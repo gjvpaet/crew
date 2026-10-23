@@ -34,7 +34,9 @@ export function bandLine(state: CrewState, progress: Progress, columns: number):
 	const segments = runningLabel ? 7 : 6
 	const fixed = 1 + pill.length + percent.length + runningLabel.length + 1 + (segments - 1)
 	const barWidth = clamp(Math.floor((columns - fixed) / 3), 6, 24)
-	const label = truncate(state.turn?.label || 'Working', Math.max(6, columns - fixed - barWidth))
+	// A label stored before envelopes were filtered can still start with `<`: never draw one.
+	const stored = state.turn?.label ?? ''
+	const label = truncate(stored && !stored.startsWith('<') ? stored : 'Working', Math.max(6, columns - fixed - barWidth))
 	const filled = Math.round(clamp(progress.fraction, 0, 1) * barWidth)
 	const tone = state.turn?.isAborted ? 'aborted' : state.turn?.endedAt ? 'done' : 'running'
 	return { label, filled: '█'.repeat(filled), empty: '░'.repeat(barWidth - filled), pill, percent, runningLabel, tone }
@@ -150,8 +152,10 @@ function rowView(
 	const steps = agent.steps
 	const parent = agent.parentId ? state.agents[agent.parentId] : undefined
 	const waitingNote = isMainWaiting ? `waiting on ${busy} agent${busy === 1 ? '' : 's'}` : ''
-	const asides = [parent ? `↳ from ${parent.description}` : '', agent.status === 'stopped' ? 'stopped' : ''].filter(Boolean)
+	const asides = [parent ? `↳ from ${parent.description}` : ''].filter(Boolean)
 	const mark = tone === 'done' ? '✓' : tone === 'failed' ? '✗' : ''
+	// "stopped" rides in the ✗ badge, one short unit on line 1 that keeps its width and never wraps away.
+	const markBadge = agent.status === 'stopped' && !isMainWaiting ? `${mark} stopped` : mark
 	const fraction = fractionOf(agent, tone, isMainWaiting)
 	const model = prettyModel(agent.model)
 	const usageText = [`ctx ${fmtPercent(contextFraction(agent))}`, fmtTokens(tokens), fmtUsd(cost)].join(' · ')
@@ -168,8 +172,8 @@ function rowView(
 		usageText,
 		elapsed,
 		steps: steps ? `${steps.done}/${steps.total}${steps.current ? ` · ${steps.current}` : ''}` : '',
-		note: isMainWaiting ? waitingNote : asides.join(' · '),
-		badge: mark || truncate(waitingNote, BADGE_MAX),
+		note: isMainWaiting ? waitingNote : [...asides, agent.status === 'stopped' ? 'stopped' : ''].filter(Boolean).join(' · '),
+		badge: markBadge || truncate(waitingNote, BADGE_MAX),
 		aside: isMainWaiting ? '' : asides.join(' · '),
 		bar: fraction === null ? shimmer(barWidth, now) : bar(fraction, barWidth),
 		fraction,

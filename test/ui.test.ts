@@ -181,9 +181,9 @@ test('an ended agent keeps its notes: stopped and where it came from', async ($,
 	for (const surface of ['terminal', 'desktop'] as const) {
 		const ui = await $.ui.mount({ ...PANE, surface })
 		expect((await ui.find({ key: 'group-Failed' }))?.text).toBe('▾ Failed · 2')
-		expect((await ui.find({ type: 'Text', text: /↳ from Research competitor launches/ }))?.text).toContain('stopped')
-		expect((await ui.findAll({ type: 'Text', text: /stopped/ })).length).toBeGreaterThanOrEqual(2)
-		expect(await ui.findAll({ type: 'Text', text: /^✗$/ })).toHaveLength(3)
+		expect(await ui.find({ type: 'Text', text: /↳ from Research competitor launches/ })).toBeDefined()
+		// Main and both agents: one "✗ stopped" badge each, never split across lines.
+		expect(await ui.findAll({ type: 'Text', text: /^✗ stopped$/ })).toHaveLength(3)
 		await ui.unmount()
 	}
 })
@@ -442,6 +442,19 @@ test('a turn an agent message starts keeps the person prompt as the band title',
 		const ui = await $.ui.mount({ ...BAND, surface })
 		expect(await ui.find({ type: 'Text', text: /Build the launch kit/ })).toBeDefined()
 		expect(await ui.find({ type: 'Text', text: /agent-message/ })).toBeUndefined()
+		await ui.unmount()
+	}
+})
+
+test('the header cards share the pane width in three equal parts', async ($, on) => {
+	await startTwoAgents($, on)
+	for (const surface of ['terminal', 'desktop'] as const) {
+		const ui = await $.ui.mount({ ...PANE, surface })
+		for (const label of ['Cost', 'Tokens', 'Time']) {
+			const card = await ui.find({ key: `card-${label}` })
+			expect(card?.props.flexGrow).toBe(1)
+			expect(card?.props.width).toBe(0)
+		}
 		await ui.unmount()
 	}
 })

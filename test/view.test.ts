@@ -247,13 +247,17 @@ test('Main waits on pending and waiting agents too, not idle ones', async () => 
 test('a row keeps its mark on line one and its note beside the model', async () => {
 	const nested = reduce(STATE, { ...spawn('a4', 'Check the hero image'), parentId: 'a2' } as CrewEvent)
 	const aborted = reduce(nested, { kind: 'turnEnd', at: 21_000, isAborted: true, reason: 'interrupted' })
-	const rows = panelView(aborted, {}, 30_000, 20, {}).groups.flatMap(group => group.rows)
+	const view = panelView(aborted, {}, 30_000, 20, {})
+	const rows = view.groups.flatMap(group => group.rows)
+	// "stopped" travels with the ✗ as one badge, so it can never wrap away from it.
 	const stopped = rows.find(row => row.id === 'a3')
-	expect(stopped?.badge).toBe('✗')
-	expect(stopped?.aside).toBe('stopped')
+	expect(stopped?.badge).toBe('✗ stopped')
+	expect(stopped?.aside).toBe('')
 	const child = rows.find(row => row.id === 'a4')
-	expect(child?.badge).toBe('✗')
-	expect(child?.aside).toBe('↳ from Design the launch graphics · stopped')
+	expect(child?.badge).toBe('✗ stopped')
+	expect(child?.aside).toBe('↳ from Design the launch graphics')
+	expect(view.main?.badge).toBe('✗ stopped')
+	expect(view.main?.aside).toBe('')
 	const finished = rows.find(row => row.id === 'a1')
 	expect(finished?.badge).toBe('✓')
 	expect(finished?.aside).toBe('')
@@ -329,4 +333,11 @@ test('toggling a group flips what it shows and nothing else', async () => {
 test('an empty session says so', async () => {
 	expect(panelView(EMPTY_STATE, {}, 0, 20, {}).isEmpty).toBe(true)
 	expect(panelView(STATE, {}, 0, 20, {}).isEmpty).toBe(false)
+})
+
+test('a stored envelope label is never drawn', async () => {
+	const stale = { ...STATE, turn: { ...STATE.turn!, label: '<agent-message from="a0d530c7c7f0">' } }
+	const progress = selectProgress(stale)
+	if (!progress) throw new Error('expected progress')
+	expect(bandLine(stale, progress, 100).label).toBe('Working')
 })

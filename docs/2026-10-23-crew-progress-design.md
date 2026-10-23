@@ -51,15 +51,15 @@ That is the terminal. On desktop, vscode and mobile the bar is one 200×18 px SV
 
 ### Agents panel
 
-- **Header cards:** ≈Cost · Tokens · Time for the current turn only (requests are tracked per model in `turnByModel`). A small line underneath shows session totals. When some model has no price, the header cost is a partial sum marked `+`.
+- **Header cards:** ≈Cost · Tokens · Time for the current turn only (requests are tracked per model in `turnByModel`). The three cards span the pane in equal thirds (each `flexGrow` 1 from `width` 0; `Box` has no `flexBasis`). A small line underneath shows session totals. When some model has no price, the header cost is a partial sum marked `+`.
 - **Groups, in order** (each header is a button, `▾ Running · 2` / `▸ Finished · 3`, that folds its group; the choice is kept per group):
   - Running
   - Waiting (`pending`, `waiting`, `idle`)
   - Finished (`completed`)
   - Failed (`failed`, `killed`, and agents stopped by an aborted turn, labelled *stopped*)
 - **Each agent is a rounded card:** Pip on the left (a crisp 32 px SVG on desktop, vscode and mobile; half-block text on the terminal), then:
-  - description, with elapsed time and ✓ (finished) or ✗ (failed or stopped) on the right; the title gives way first in a narrow pane
-  - effort coloured by level (low green, medium blue, high amber, xhigh/max red), only when the event data includes it (never inferred), then model · ctx % · tokens · ≈$ for that agent's lifetime usage, then its notes (`↳ from <parent>`, `stopped`), which stay after the agent ends
+  - description, with elapsed time and a badge on the right: ✓ (finished), ✗ (failed) or `✗ stopped` as one unit, so "stopped" never wraps away from its mark; the title gives way first in a narrow pane
+  - one Text that truncates as a unit: effort coloured by level (low green, medium blue, high amber, xhigh/max red), only when the event data includes it (never inferred), then model · ctx % · tokens · ≈$ for that agent's lifetime usage, then `↳ from <parent>` for a nested agent, which stays after the agent ends
   - per-agent step progress (`3/5 · step name`) only when that agent's own task-list calls are visible
   - a bar in the agent's own colour (six fixed accents, the next one taken when the agent is first seen and kept for its life, through a resume too; Main wears Pip's blue `#7C9CF5`, which no sub-agent gets): to scale with steps, full at the end, a shimmer while running without steps. An SVG off the terminal, the text bar on it.
 - **A Main card** for the lead agent. Main starts from zero each turn, so it matches the header; a sub-agent that carries over from an earlier turn shows its lifetime usage, so the rows can exceed the header totals. Once Main's own turn has ended while sub-agents are still running, pending or waiting (idle ones do not count), it reads `waiting on N agents` instead of ✓ and its bar shimmers.

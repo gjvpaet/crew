@@ -45,7 +45,8 @@ export function registerPanel(on: On) {
 		const view = panelView(state, prefs, now, barColumns, open, { sprites: !Svg })
 
 		const card = (label: string, value: string) => (
-			<Box key={`card-${label}`} flexDirection="column" borderStyle="round" paddingX={1}>
+			// width 0 + flexGrow 1: the three cards start from nothing and grow to equal thirds of the pane.
+			<Box key={`card-${label}`} flexDirection="column" borderStyle="round" paddingX={1} flexGrow={1} width={0}>
 				<Text dimColor size="caption">
 					{label}
 				</Text>
@@ -115,14 +116,13 @@ export function registerPanel(on: On) {
 							)}
 						</Box>
 					</Box>
-					<Box flexDirection="row" gap={1}>
+					{/* One Text, so the whole line truncates as a unit instead of wrapping a piece into the next column. */}
+					<Text dimColor wrap="truncate-end">
 						{row.effort && (
-							<Text {...(row.effortTone ? { color: row.effortTone } : { dimColor: true })}>{row.effort}</Text>
+							<Text {...(row.effortTone ? { color: row.effortTone } : {})}>{`${row.effort} · `}</Text>
 						)}
-						<Text dimColor wrap="truncate-end">
-							{`${row.effort ? '· ' : ''}${row.model} · ${row.usageText}${row.aside ? ` · ${row.aside}` : ''}`}
-						</Text>
-					</Box>
+						{`${row.model} · ${row.usageText}${row.aside ? ` · ${row.aside}` : ''}`}
+					</Text>
 					{row.steps && <Text wrap="truncate-end">{row.steps}</Text>}
 					{progress(row)}
 				</Box>
@@ -131,7 +131,7 @@ export function registerPanel(on: On) {
 
 		return (
 			<Box flexDirection="column">
-				<Box flexDirection="row" gap={1}>
+				<Box flexDirection="row" gap={1} width="100%" marginBottom={1}>
 					{card('Cost', view.cost)}
 					{card('Tokens', view.tokens)}
 					{card('Time', view.time)}

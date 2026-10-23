@@ -130,8 +130,9 @@ function startTurn(state: CrewState, ev: Extract<CrewEvent, { kind: 'turnStart' 
 		const { endedAt: _ended, ...rest } = agent
 		return { ...withAgent(state, { ...rest, status: 'running' }), order: withOrder(state, ev.agentId), nextColor, known }
 	}
-	// An empty prompt, or one no person typed, carries on the turn the person started.
-	if (state.turn && (ev.text === '' || ev.isPerson === false)) {
+	// An empty prompt, one no person typed, or (origin unknown) a raw `<…>` envelope carries on the person's turn.
+	const isEnvelope = ev.isPerson === undefined && firstLine(ev.text).startsWith('<')
+	if (state.turn && (ev.text === '' || ev.isPerson === false || isEnvelope)) {
 		const { endedAt: _turnEnded, ...turn } = state.turn
 		const { endedAt: _mainEnded, ...main } = state.agents[MAIN] ?? newAgent(MAIN, ev.at)
 		return { ...withAgent(state, { ...main, status: 'running' }), turn: { ...turn, isAborted: false } }

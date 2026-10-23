@@ -350,3 +350,14 @@ test('a label never shows a raw message envelope', async () => {
 	const unmarked = reduce(EMPTY_STATE, { kind: 'turnStart', at: 1000, turnId: 't1', text: '<agent-message from="a6">hi' })
 	expect(unmarked.turn?.label).toBe('Working')
 })
+
+test('an envelope turn of unknown origin continues the current turn', async () => {
+	const next = reduce(run(START), {
+		kind: 'turnStart',
+		at: 25_000,
+		turnId: 't2',
+		text: '<agent-message from="a0d530c7c7f0">Task 6 done</agent-message>'
+	})
+	expect(next.turn?.id).toBe('t1')
+	expect(next.turn?.label).toBe('Build the launch kit')
+})
