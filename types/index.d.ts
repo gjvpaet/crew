@@ -38,6 +38,8 @@ export type AgentRecord = {
 	steps?: Steps
 }
 
+export type AgentIdentity = { description: string; type: string; role: Role; parentId?: string; model?: string }
+
 export type TurnInfo = {
 	id: string
 	label: string
@@ -53,6 +55,8 @@ export type CrewState = {
 	tasks: TaskItem[]
 	agentTasks: Record<string, TaskItem[]>
 	sessionByModel: Record<string, Usage>
+	turnByModel: Record<string, Usage>
+	known: Record<string, AgentIdentity>
 }
 
 declare module 'claude-code' {

@@ -152,3 +152,106 @@ test('statuses update known agents and their parents', async () => {
 	expect(state.agents.a2.endedAt).toBe(9000)
 	expect(state.agents.a2.parentId).toBe('a1')
 })
+
+test('a continuation after a background agent reopens the turn', async () => {
+	const state = run([
+		{ kind: 'turnStart', at: 1000, turnId: 't1', text: 'go' },
+		spawn('bg', 'Run the background check'),
+		{ kind: 'turnEnd', at: 3000, isAborted: false, reason: 'answer' },
+		{ kind: 'turnEnd', at: 4000, agentId: 'bg', isAborted: false, reason: 'answer' },
+		{ kind: 'turnStart', at: 5000, turnId: 't2', text: '' }
+	])
+	expect(state.turn?.id).toBe('t1')
+	expect(state.turn?.endedAt).toBeUndefined()
+	expect(state.turn?.isAborted).toBe(false)
+	expect(state.agents[MAIN].status).toBe('running')
+	expect(state.agents[MAIN].endedAt).toBeUndefined()
+})
+
+test('an agent resumed by a new prompt keeps its identity', async () => {
+	const state = run([
+		{ kind: 'turnStart', at: 1000, turnId: 't1', text: 'go' },
+		spawn('a', 'Review the diff'),
+		{ kind: 'turnEnd', at: 3000, agentId: 'a', isAborted: false, reason: 'answer' },
+		{ kind: 'turnEnd', at: 4000, isAborted: false, reason: 'answer' },
+		{ kind: 'turnStart', at: 5000, turnId: 't2', text: 'ask a again' },
+		{ kind: 'turnStart', at: 5500, turnId: 'x', text: 'again', agentId: 'a' }
+	])
+	expect(state.agents.a.description).toBe('Review the diff')
+	expect(state.agents.a.role).toBe('reviewer')
+	expect(state.order).toEqual(['a'])
+})
+
+test('an abort spares idle teammates and a step revives a stopped agent', async () => {
+	const aborted = run([
+		...START,
+		spawn('tm', 'Teammate on standby'),
+		{ kind: 'statuses', at: 2500, list: [{ id: 'tm', status: 'idle' }] },
+		{ kind: 'turnEnd', at: 3000, isAborted: true, reason: 'aborted' }
+	])
+	expect(aborted.agents.tm.status).toBe('idle')
+	expect(aborted.agents.a1.status).toBe('stopped')
+	const revived = reduce(aborted, {
+		kind: 'step',
+		at: 4000,
+		agentId: 'a1',
+		model: 'claude-opus-5-5',
+		usage: usage(10, 0, 0, 0)
+	})
+	expect(revived.agents.a1.status).toBe('running')
+	expect(revived.agents.a1.endedAt).toBeUndefined()
+})
+
+test('turn totals count only this turn while the session counts everything', async () => {
+	const state = run([
+		{ kind: 'turnStart', at: 1000, turnId: 't1', text: 'go' },
+		spawn('bg', 'Run the background check'),
+		{ kind: 'step', at: 3000, agentId: 'bg', model: 'claude-opus-5-5', usage: usage(1_000_000, 0, 0, 0) },
+		{ kind: 'turnStart', at: 4000, turnId: 't2', text: 'hi' },
+		{ kind: 'step', at: 5000, model: 'claude-opus-5-5', usage: usage(100, 0, 0, 0) }
+	])
+	expect(selectTurnTotals(state).tokens).toBe(100)
+	expect(selectSessionTotals(state).tokens).toBe(1_000_100)
+})
+
+test('an idle teammate counts as done and an ended agent is not regressed', async () => {
+	const ended = run([
+		{ kind: 'turnStart', at: 1000, turnId: 't1', text: 'go' },
+		spawn('tm', 'Teammate on standby'),
+		{ kind: 'turnEnd', at: 5000, agentId: 'tm', isAborted: false, reason: 'answer' },
+		{ kind: 'statuses', at: 6000, list: [{ id: 'tm', status: 'idle' }] }
+	])
+	expect(ended.agents.tm.status).toBe('completed')
+	expect(ended.agents.tm.endedAt).toBe(5000)
+	expect(selectProgress(ended)?.done).toBe(1)
+	expect(selectProgress(ended)?.total).toBe(1)
+
+	const idle = run([
+		{ kind: 'turnStart', at: 1000, turnId: 't1', text: 'go' },
+		spawn('tm', 'Teammate on standby'),
+		{ kind: 'statuses', at: 6000, list: [{ id: 'tm', status: 'idle' }] }
+	])
+	expect(selectProgress(idle)?.done).toBe(1)
+})
+
+test('missing usage fields do not poison totals', async () => {
+	const state = run([
+		{ kind: 'turnStart', at: 1000, turnId: 't1', text: 'go' },
+		{
+			kind: 'step',
+			at: 2000,
+			model: 'claude-opus-5-5',
+			usage: { input_tokens: 10, output_tokens: 5 } as any
+		}
+	])
+	expect(selectSessionTotals(state).tokens).toBe(15)
+})
+
+test('the main context size carries across prompts', async () => {
+	const state = run([
+		{ kind: 'turnStart', at: 1000, turnId: 't1', text: 'go' },
+		{ kind: 'step', at: 2000, model: 'claude-opus-5-5', usage: usage(1000, 0, 9000, 0) },
+		{ kind: 'turnStart', at: 3000, turnId: 't2', text: 'next' }
+	])
+	expect(state.agents[MAIN].lastRequestInput).toBe(10_000)
+})
