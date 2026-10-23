@@ -1,14 +1,21 @@
 import { atom, read, update } from 'claude-code'
 import type { On } from 'claude-code'
 
+import type { MascotPrefs } from '../types'
+import { bandBarSvg, pipSvg } from './svg'
 import { EMPTY_STATE, selectProgress } from './tracker'
 import { bandLine } from './view'
 
 // The engine's scan follows state refs only through consts of the same file, so each file declares its own.
 const model = atom({ plugin: 'crew', key: 'model' } as const, EMPTY_STATE)
 const isBandHidden = atom({ plugin: 'crew', key: 'isBandHidden' } as const, false)
+const mascots = atom({ plugin: 'crew', key: 'mascots' } as const, {} as MascotPrefs)
 
 const DOT = { running: 'claude', done: 'success', aborted: 'error' } as const
+
+// The SVG bar's look on desktop, vscode and mobile: a lilac fill under a purple pill.
+const BAR = { width: 160, height: 18, fill: '#AFA9EC', pillBg: '#534AB7', pillFg: '#EEEDFE' }
+const MINI_PIP_PX = 16
 
 // `onViewport` hears whether the surface docks a pane beside the transcript, each time the band is drawn where it said.
 export function registerBand(on: On, onViewport: (isFullscreen: boolean) => void) {
@@ -18,10 +25,54 @@ export function registerBand(on: On, onViewport: (isFullscreen: boolean) => void
 		const progress = selectProgress(state)
 		if (e.props.hasSurvey || !progress || (await read($, isBandHidden))) return next(e)
 
-		const { Box, Button, Text } = $.ui.resolve(e)
+		const elements = $.ui.resolve(e)
+		const { Box, Button, Text } = elements
 		const line = bandLine(state, progress, e.props.bodyColumns)
 
-		// Desktop drops trailing spaces inside a Text, so every gap comes from the row's `gap`.
+		// Desktop drops trailing spaces inside a Text, so on every surface each gap comes from the row's `gap`.
+		// Every surface but the terminal draws the bar, its pill and a mini Pip as SVG.
+		if (e.surface !== 'terminal' && 'Svg' in elements) {
+			const { Svg } = elements
+			const prefs = await read($, mascots)
+			return (
+				<Box flexDirection="row" gap={1} alignItems="center">
+					<Text color={DOT[line.tone]}>●</Text>
+					<Text weight="semibold" wrap="truncate-end">
+						{line.label}
+					</Text>
+					<Svg
+						source={bandBarSvg({
+							fraction: progress.fraction,
+							width: BAR.width,
+							height: BAR.height,
+							color: BAR.fill,
+							pill: line.pill,
+							pillBg: BAR.pillBg,
+							pillFg: BAR.pillFg
+						})}
+						alt={`${line.pill}, ${line.percent}`}
+						width={BAR.width}
+						height={BAR.height}
+					/>
+					<Text tabular>{line.percent}</Text>
+					{line.runningLabel && (
+						<Svg
+							source={pipSvg('developer', prefs, MINI_PIP_PX)}
+							alt="developer mascot"
+							width={MINI_PIP_PX}
+							height={MINI_PIP_PX}
+						/>
+					)}
+					{line.runningLabel && (
+						<Text dimColor tabular>
+							{line.runningLabel}
+						</Text>
+					)}
+					<Button key="hide" label="×" plain onPress={() => update($, isBandHidden, () => true)} />
+				</Box>
+			)
+		}
+
 		return (
 			<Box flexDirection="row" gap={1}>
 				<Text color={DOT[line.tone]}>●</Text>

@@ -54,17 +54,35 @@ async function startTwoAgents($: any, on: any) {
 
 test('the band shows agent progress and hides on ×', async ($, on) => {
 	await startTwoAgents($, on)
-	for (const surface of ['terminal', 'desktop'] as const) {
-		const ui = await $.ui.mount({ ...BAND, surface })
-		expect((await ui.find({ type: 'Text', text: /Agents 0\/2/ }))?.text).toContain('Agents 0/2')
-		expect((await ui.find({ type: 'Text', text: /running/ }))?.text).toBe('2 running')
-		// Desktop drops trailing spaces inside a Text, so the gaps come from the row, never from padding.
-		expect((await ui.find({ type: 'Text', text: /%/ }))?.text).toBe('0%')
-		expect((await ui.find({ type: 'Text', text: /Agents/ }))?.text).toBe('Agents 0/2')
-		await ui.unmount()
-	}
+	const terminal = await $.ui.mount({ ...BAND, surface: 'terminal' })
+	expect((await terminal.find({ type: 'Text', text: /Agents 0\/2/ }))?.text).toContain('Agents 0/2')
+	expect((await terminal.find({ type: 'Text', text: /running/ }))?.text).toBe('2 running')
+	// Desktop drops trailing spaces inside a Text, so the gaps come from the row, never from padding.
+	expect((await terminal.find({ type: 'Text', text: /%/ }))?.text).toBe('0%')
+	expect((await terminal.find({ type: 'Text', text: /Agents/ }))?.text).toBe('Agents 0/2')
+	expect(await terminal.findAll({ type: 'Svg' })).toHaveLength(0)
+	await terminal.unmount()
 	const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+	expect((await ui.find({ type: 'Text', text: /running/ }))?.text).toBe('2 running')
+	expect((await ui.find({ type: 'Text', text: /%/ }))?.text).toBe('0%')
 	await ui.press({ key: 'hide' })
+	expect(await svgs(ui, /Agents 0\/2/)).toHaveLength(0)
+	expect(await ui.find({ type: 'Text', text: /running/ })).toBeUndefined()
+	await ui.unmount()
+})
+
+test('on desktop the band draws its bar, pill and a mini Pip as SVG', async ($, on) => {
+	await startTwoAgents($, on)
+	const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+	const [bar] = await svgs(ui, /Agents 0\/2/)
+	expect(bar).toBeDefined()
+	expect(String(bar?.props.source)).toContain('>Agents 0/2</text>')
+	expect(bar?.props.height).toBe(18)
+	const [pip] = await svgs(ui, /mascot/)
+	expect(String(pip?.props.source)).toContain('shape-rendering="crispEdges"')
+	expect(pip?.props.width).toBe(16)
+	expect((await ui.find({ type: 'Text', text: /running/ }))?.text).toBe('2 running')
+	// The pill lives in the SVG on desktop, never as a second text.
 	expect(await ui.find({ type: 'Text', text: /Agents 0\/2/ })).toBeUndefined()
 	await ui.unmount()
 })
@@ -98,6 +116,19 @@ test('on desktop every agent card draws Pip and its bar as SVG', async ($, on) =
 	expect(String(landing?.props.source)).toContain('#7F77DD')
 	expect(await ui.find({ type: 'Text', text: /▀|▄/ })).toBeUndefined()
 	await ui.unmount()
+})
+
+test('vscode and mobile draw the same SVG cards and band as desktop', async ($, on) => {
+	await startTwoAgents($, on)
+	for (const surface of ['vscode', 'mobile'] as const) {
+		const pane = await $.ui.mount({ ...PANE, surface })
+		expect(await svgs(pane, /mascot/)).toHaveLength(3)
+		expect(await svgs(pane, /progress/)).toHaveLength(3)
+		await pane.unmount()
+		const band = await $.ui.mount({ ...BAND, surface })
+		expect(await svgs(band, /Agents 0\/2/)).toHaveLength(1)
+		await band.unmount()
+	}
 })
 
 test('on the terminal the cards draw the half-block Pip and a text bar', async ($, on) => {
@@ -222,7 +253,11 @@ test('an agent run lands on the pane and the band through the engine', async ($,
 		expect((await pane.find({ type: 'Text', text: /1\.5k/ }))?.text).toContain('1.5k')
 		await pane.unmount()
 		const band = await $.ui.mount({ ...BAND, surface })
-		expect((await band.find({ type: 'Text', text: /Agents 1\/1/ }))?.text).toContain('Agents 1/1')
+		const pill =
+			surface === 'terminal'
+				? (await band.find({ type: 'Text', text: /Agents 1\/1/ }))?.text
+				: (await svgs(band, /Agents 1\/1/))[0]?.props.alt
+		expect(pill).toContain('Agents 1/1')
 		await band.unmount()
 	}
 })
