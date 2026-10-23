@@ -1,5 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
+import { PALETTE } from '../hooks/sprite'
 import { EMPTY_STATE, reduce, selectProgress, type CrewEvent } from '../hooks/tracker'
 import { ACCENTS, COLLAPSE_AFTER, bandLine, effortToneOf, panelView, toggleGroup } from '../hooks/view'
 
@@ -89,17 +90,61 @@ test('effort maps to a theme tone', async () => {
 	expect(running?.effortTone).toBeUndefined()
 })
 
-test('each agent keeps its accent by spawn order, Main the first', async () => {
+test('each agent takes the next accent at spawn; Main wears Pip blue', async () => {
 	expect(ACCENTS).toEqual(['#1D9E75', '#7F77DD', '#D85A30', '#378ADD', '#D4537E', '#BA7517'])
 	const seven = ['a4', 'a5', 'a6', 'a7'].reduce((state, id) => reduce(state, spawn(id, `Job ${id}`)), STATE)
 	const view = panelView(seven, {}, 30_000, 20, {})
 	const rows = view.groups.flatMap(group => group.rows)
 	const accentOf = (id: string) => rows.find(row => row.id === id)?.accent
-	expect(view.main?.accent).toBe('#1D9E75')
+	expect(view.main?.accent).toBe(PALETTE.body)
+	expect(view.main?.accent).toBe('#7C9CF5')
+	expect(rows.map(row => row.accent)).not.toContain(PALETTE.body)
 	expect(accentOf('a1')).toBe(ACCENTS[0])
 	expect(accentOf('a2')).toBe(ACCENTS[1])
 	expect(accentOf('a6')).toBe(ACCENTS[5])
 	expect(accentOf('a7')).toBe(ACCENTS[0])
+})
+
+const accentsOf = (state: typeof STATE) =>
+	Object.fromEntries(panelView(state, {}, 30_000, 20, {}).groups.flatMap(group => group.rows).map(row => [row.id, row.accent]))
+
+test('agents keep their colour after a new prompt drops finished agents before them', async () => {
+	expect(accentsOf(STATE)).toEqual({ a1: ACCENTS[0], a2: ACCENTS[1], a3: ACCENTS[2] })
+	const next = reduce(STATE, { kind: 'turnStart', at: 30_000, turnId: 't2', text: 'Now the email' })
+	expect(next.order).toEqual(['a2', 'a3'])
+	const later = reduce(next, spawn('a4', 'Write the email'))
+	expect(accentsOf(later)).toEqual({ a2: ACCENTS[1], a3: ACCENTS[2], a4: ACCENTS[3] })
+})
+
+test('a resumed agent keeps its colour', async () => {
+	const next = reduce(STATE, { kind: 'turnStart', at: 30_000, turnId: 't2', text: 'Again' })
+	expect(next.agents.a1).toBeUndefined()
+	const fresh = reduce(next, spawn('a4', 'Something new'))
+	// Resumed through its own turn, then through a second spawn of the same id.
+	const resumed = reduce(fresh, { kind: 'turnStart', at: 31_000, turnId: 's1', text: 'go on', agentId: 'a1' })
+	expect(accentsOf(resumed).a1).toBe(ACCENTS[0])
+	const respawned = reduce(fresh, spawn('a1', 'Research competitor launches'))
+	expect(accentsOf(respawned).a1).toBe(ACCENTS[0])
+	expect(accentsOf(respawned).a4).toBe(ACCENTS[3])
+})
+
+test('six spawns cycle through all six colours, then start again', async () => {
+	const ids = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7']
+	const state = ids.reduce((acc, id) => reduce(acc, spawn(id, `Job ${id}`)), EMPTY_STATE)
+	const accents = accentsOf(state)
+	expect(ids.slice(0, 6).map(id => accents[id])).toEqual(ACCENTS)
+	expect(accents.c7).toBe(ACCENTS[0])
+	expect(state.nextColor).toBe(7)
+})
+
+test('agents first seen without a spawn take the next colour; Main never does', async () => {
+	const stepped = reduce(STATE, { kind: 'step', at: 4000, agentId: 'x1', model: 'claude-opus-5-5', usage })
+	expect(stepped.agents.x1.colorIndex).toBe(3)
+	const started = reduce(stepped, { kind: 'turnStart', at: 5000, turnId: 's2', text: 'go', agentId: 'x2' })
+	expect(started.agents.x2.colorIndex).toBe(4)
+	const mainStep = reduce(started, { kind: 'step', at: 6000, model: 'claude-opus-5-5', usage })
+	expect(mainStep.agents.main.colorIndex).toBeUndefined()
+	expect(mainStep.nextColor).toBe(5)
 })
 
 test('the row fraction drives the bar: steps, done, shimmer, waiting', async () => {

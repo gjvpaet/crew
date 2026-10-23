@@ -15,7 +15,8 @@ export const EMPTY_STATE: CrewState = {
 	agentTasks: {},
 	sessionByModel: {},
 	turnByModel: {},
-	known: {}
+	known: {},
+	nextColor: 0
 }
 
 export type ApiUsage = {
@@ -74,7 +75,8 @@ const identityOf = (agent: AgentRecord): AgentIdentity => ({
 	type: agent.type,
 	role: agent.role,
 	...(agent.model ? { model: agent.model } : {}),
-	...(agent.parentId ? { parentId: agent.parentId } : {})
+	...(agent.parentId ? { parentId: agent.parentId } : {}),
+	...(agent.colorIndex !== undefined ? { colorIndex: agent.colorIndex } : {})
 })
 
 const withAgent = (state: CrewState, agent: AgentRecord): CrewState => ({
@@ -85,6 +87,12 @@ const withAgent = (state: CrewState, agent: AgentRecord): CrewState => ({
 const withOrder = (state: CrewState, id: string): string[] =>
 	id === MAIN || state.order.includes(id) ? state.order : [...state.order, id]
 
+// A sub-agent keeps the colour it was first given; one without takes the next, and Main never takes one.
+function withColor(state: CrewState, agent: AgentRecord): { agent: AgentRecord; nextColor: number } {
+	if (agent.id === MAIN || agent.colorIndex !== undefined) return { agent, nextColor: state.nextColor }
+	return { agent: { ...agent, colorIndex: state.nextColor }, nextColor: state.nextColor + 1 }
+}
+
 function endStatus(isAborted: boolean, reason: string): AgentStatusView {
 	if (isAborted) return 'stopped'
 	return reason === 'error' || reason === 'refusal' ? 'failed' : 'completed'
@@ -92,9 +100,10 @@ function endStatus(isAborted: boolean, reason: string): AgentStatusView {
 
 function startTurn(state: CrewState, ev: Extract<CrewEvent, { kind: 'turnStart' }>): CrewState {
 	if (ev.agentId) {
-		const agent = state.agents[ev.agentId] ?? newAgent(ev.agentId, ev.at, state.known[ev.agentId] ?? {})
+		const found = state.agents[ev.agentId] ?? newAgent(ev.agentId, ev.at, state.known[ev.agentId] ?? {})
+		const { agent, nextColor } = withColor(state, found)
 		const { endedAt: _ended, ...rest } = agent
-		return { ...withAgent(state, { ...rest, status: 'running' }), order: withOrder(state, ev.agentId) }
+		return { ...withAgent(state, { ...rest, status: 'running' }), order: withOrder(state, ev.agentId), nextColor }
 	}
 	if (ev.text === '' && state.turn) {
 		const { endedAt: _turnEnded, ...turn } = state.turn
@@ -124,18 +133,22 @@ function spawnAgent(state: CrewState, ev: Extract<CrewEvent, { kind: 'spawn' }>)
 	const previous = state.agents[ev.agentId]
 	const model = previous?.model ?? ev.model
 	const parentId = ev.parentId ?? previous?.parentId ?? state.known[ev.agentId]?.parentId
+	const keptColor = previous?.colorIndex ?? state.known[ev.agentId]?.colorIndex
+	const colorIndex = keptColor ?? state.nextColor
 	const agent: AgentRecord = {
 		...(previous ?? newAgent(ev.agentId, ev.at)),
 		description: ev.description || 'Agent',
 		type: ev.subagentType,
 		role: roleFor({ type: ev.subagentType, description: ev.description }),
 		...(model ? { model } : {}),
-		...(parentId ? { parentId } : {})
+		...(parentId ? { parentId } : {}),
+		colorIndex
 	}
 	return {
 		...withAgent(state, agent),
 		order: withOrder(state, ev.agentId),
-		known: { ...state.known, [ev.agentId]: identityOf(agent) }
+		known: { ...state.known, [ev.agentId]: identityOf(agent) },
+		nextColor: keptColor === undefined ? state.nextColor + 1 : state.nextColor
 	}
 }
 
@@ -147,11 +160,13 @@ function revive(agent: AgentRecord): AgentRecord {
 
 function addStep(state: CrewState, ev: Extract<CrewEvent, { kind: 'step' }>): CrewState {
 	const id = ev.agentId ?? MAIN
-	const existing = state.agents[id] ?? newAgent(id, ev.at, state.known[id] ?? {})
+	const colored = withColor(state, state.agents[id] ?? newAgent(id, ev.at, state.known[id] ?? {}))
+	const existing = colored.agent
 	const order = withOrder(state, id)
+	const nextColor = colored.nextColor
 	const effort = ev.effort ?? existing.effort
 	if (!ev.usage) {
-		return { ...withAgent(state, { ...existing, model: ev.model, ...(effort ? { effort } : {}) }), order }
+		return { ...withAgent(state, { ...existing, model: ev.model, ...(effort ? { effort } : {}) }), order, nextColor }
 	}
 	// Only a step that carries usage proves the agent is alive again.
 	const previous = revive(existing)
@@ -169,6 +184,7 @@ function addStep(state: CrewState, ev: Extract<CrewEvent, { kind: 'step' }>): Cr
 	return {
 		...withAgent(state, agent),
 		order,
+		nextColor,
 		sessionByModel: { ...state.sessionByModel, [model]: addUsage(state.sessionByModel[model] ?? ZERO, ev.usage) },
 		turnByModel: { ...state.turnByModel, [model]: addUsage(state.turnByModel[model] ?? ZERO, ev.usage) }
 	}

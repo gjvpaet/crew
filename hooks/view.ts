@@ -1,7 +1,7 @@
 import type { AgentRecord, CrewState, MascotPrefs, Role } from '../types'
 import { bar, clamp, fmtDuration, fmtPercent, fmtTokens, fmtUsd, prettyModel, shimmer, truncate } from './format'
 import { estimateUsd } from './pricing'
-import { spriteCells, type SpriteCell } from './sprite'
+import { PALETTE, spriteCells, type SpriteCell } from './sprite'
 import {
 	MAIN,
 	contextFraction,
@@ -42,7 +42,7 @@ export function bandLine(state: CrewState, progress: Progress, columns: number):
 
 export type Tone = 'running' | 'waiting' | 'done' | 'failed'
 
-// One colour per sub-agent, by its place in the spawn order; Main wears the first.
+// One colour per sub-agent, the index taken once when it is first seen; Main wears Pip's own blue, never one of these.
 export const ACCENTS = ['#1D9E75', '#7F77DD', '#D85A30', '#378ADD', '#D4537E', '#BA7517']
 
 export type EffortTone = 'success' | 'suggestion' | 'warning' | 'error'
@@ -109,8 +109,12 @@ function fractionOf(agent: AgentRecord, tone: Tone): number | null {
 	return 0
 }
 
-const accentOf = (agent: AgentRecord, state: CrewState) =>
-	agent.id === MAIN ? ACCENTS[0] : ACCENTS[Math.max(0, state.order.indexOf(agent.id)) % ACCENTS.length]
+// A record saved before colours were stored has no index: its place in the order stands in.
+function accentOf(agent: AgentRecord, state: CrewState): string {
+	if (agent.id === MAIN) return PALETTE.body
+	const index = agent.colorIndex ?? Math.max(0, state.order.indexOf(agent.id))
+	return ACCENTS[index % ACCENTS.length]
+}
 
 function rowView(agent: AgentRecord, state: CrewState, prefs: MascotPrefs, now: number, barWidth: number): RowView {
 	const running = agent.id === MAIN ? selectRunning(state) : 0

@@ -61,7 +61,7 @@ That is the terminal. On desktop, vscode and mobile the bar is one 160×18 px SV
   - description, with elapsed time and ✓ (finished), ✗ (failed or stopped) or a note on the right
   - effort coloured by level (low green, medium blue, high amber, xhigh/max red), only when the event data includes it (never inferred), then model · ctx % · tokens · ≈$ for that agent's lifetime usage
   - per-agent step progress (`3/5 · step name`) only when that agent's own task-list calls are visible
-  - a bar in the agent's own colour (six fixed accents, by spawn order; Main takes the first): to scale with steps, full at the end, a shimmer while running without steps. An SVG off the terminal, the text bar on it.
+  - a bar in the agent's own colour (six fixed accents, the next one taken when the agent is first seen and kept for its life, through a resume too; Main wears Pip's blue `#7C9CF5`, which no sub-agent gets): to scale with steps, full at the end, a shimmer while running without steps. An SVG off the terminal, the text bar on it.
 - **A Main card** for the lead agent. Main starts from zero each turn, so it matches the header; a sub-agent that carries over from an earlier turn shows its lifetime usage, so the rows can exceed the header totals. Once Main's own turn has ended while sub-agents still run, it reads `waiting on N agents` instead of ✓.
 - **Many agents:** with more than 8 sub-agents (Main not counted), Finished starts folded; every group starts open otherwise.
 - **Nested agents:** listed flat, with `↳ from <parent description>` taken from `parentId`.
@@ -89,7 +89,7 @@ Each unit has one job. The calculating units import nothing from the UI and are 
 
 | Unit | Responsibility | Depends on |
 |---|---|---|
-| `tracker.ts` | A pure reducer: `(state, event) → state`. Holds the current turn, the main task list, per-agent task lists, an `agents` map keyed by agent id (`description, type, role, model, effort?, status, parentId, spawnedAt, endedAt, usage {input, output, cacheRead, cacheWrite}, lastRequestInput, steps?`), per-model usage for the session and for the turn (`sessionByModel`, `turnByModel`) and `known`, the identity of every agent seen. Also exports derived selectors for progress, totals and groups. | `roles.ts`, `pricing.ts`, `tasks.ts` |
+| `tracker.ts` | A pure reducer: `(state, event) → state`. Holds the current turn, the main task list, per-agent task lists, an `agents` map keyed by agent id (`description, type, role, model, effort?, status, parentId, spawnedAt, endedAt, usage {input, output, cacheRead, cacheWrite}, lastRequestInput, steps?, colorIndex?`), per-model usage for the session and for the turn (`sessionByModel`, `turnByModel`) `known`, the identity of every agent seen (colour index included), and `nextColor`, the index the next new sub-agent takes. Also exports derived selectors for progress, totals and groups. | `roles.ts`, `pricing.ts`, `tasks.ts` |
 | `tasks.ts` | Turns task-list tool calls (`TodoWrite`, `TaskCreate`, `TaskUpdate`, `mcp__ccd_turn__update_plan`) into a task list and `{done, total, current}`. | none |
 | `pricing.ts` | Per-model price table (input, output, cacheRead, cacheWrite per MTok, plus context window) with an `asOf` date. `estimateUsd(usage, model)` returns `null` for unknown models. `contextWindow(model)` comes from the same table. | none |
 | `roles.ts` | `roleFor({type, description})` returns `developer | designer | researcher | reviewer | plain`. | none |

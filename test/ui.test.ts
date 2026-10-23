@@ -138,7 +138,8 @@ test('on the terminal the cards draw the half-block Pip and a text bar', async (
 	expect(await ui.find({ type: 'Text', text: /▀|▄/ })).toBeDefined()
 	const bar = await ui.find({ type: 'Text', text: /^[█░▓]{8,}$/ })
 	expect(bar).toBeDefined()
-	expect(['#1D9E75', '#7F77DD']).toContain(bar?.props.color)
+	// Main's bar comes first, in Pip blue.
+	expect(bar?.props.color).toBe('#7C9CF5')
 	await ui.unmount()
 })
 

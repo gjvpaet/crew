@@ -36,9 +36,18 @@ export type AgentRecord = {
 	usage: Usage
 	lastRequestInput: number
 	steps?: Steps
+	// Index into the panel's accents, taken once when the agent is first seen and kept for its life.
+	colorIndex?: number
 }
 
-export type AgentIdentity = { description: string; type: string; role: Role; parentId?: string; model?: string }
+export type AgentIdentity = {
+	description: string
+	type: string
+	role: Role
+	parentId?: string
+	model?: string
+	colorIndex?: number
+}
 
 export type TurnInfo = {
 	id: string
@@ -57,6 +66,8 @@ export type CrewState = {
 	sessionByModel: Record<string, Usage>
 	turnByModel: Record<string, Usage>
 	known: Record<string, AgentIdentity>
+	// The colour index the next new sub-agent takes.
+	nextColor: number
 }
 
 declare module 'claude-code' {
