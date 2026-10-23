@@ -21,21 +21,23 @@ export type BandLine = {
 	empty: string
 	pill: string
 	percent: string
-	running: number
+	// '' when the turn has no sub-agents, so the band leaves the count out.
+	runningLabel: string
 	tone: 'running' | 'done' | 'aborted'
 }
 
 export function bandLine(state: CrewState, progress: Progress, columns: number): BandLine {
 	const pill = `${progress.source === 'tasks' ? 'Tasks' : 'Agents'} ${progress.done}/${progress.total}`
 	const percent = fmtPercent(progress.fraction)
-	const running = selectRunning(state)
-	// "● " + " " + bar + " " + pill + "  " + percent + "  ▣×n  " + "×"
-	const fixed = 2 + 1 + 1 + pill.length + 2 + percent.length + 2 + `▣×${running}`.length + 2 + 1
+	const runningLabel = state.order.length > 0 ? `${selectRunning(state)} running` : ''
+	// Segments: dot, label, bar, pill, percent, [running], hide button — one cell of gap between each.
+	const segments = runningLabel ? 7 : 6
+	const fixed = 1 + pill.length + percent.length + runningLabel.length + 1 + (segments - 1)
 	const barWidth = clamp(Math.floor((columns - fixed) / 3), 6, 24)
 	const label = truncate(state.turn?.label || 'Working', Math.max(6, columns - fixed - barWidth))
 	const filled = Math.round(clamp(progress.fraction, 0, 1) * barWidth)
 	const tone = state.turn?.isAborted ? 'aborted' : state.turn?.endedAt ? 'done' : 'running'
-	return { label, filled: '█'.repeat(filled), empty: '░'.repeat(barWidth - filled), pill, percent, running, tone }
+	return { label, filled: '█'.repeat(filled), empty: '░'.repeat(barWidth - filled), pill, percent, runningLabel, tone }
 }
 
 export type Tone = 'running' | 'waiting' | 'done' | 'failed'

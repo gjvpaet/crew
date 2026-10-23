@@ -32,8 +32,10 @@ From the Claude Code mods docs (overview, reference, events, interface, api):
 ### Band above the prompt
 
 ```
-● Refactor deal filters   [██████░░░░ Tasks 3/5]  60%   ▣×3   ×
+● Refactor deal filters ██████░░░░ Tasks 3/5 60% 3 running ×
 ```
+
+Every gap between segments comes from the row's `gap`, never from spaces inside a text (Desktop drops trailing spaces).
 
 - **Shown when** a turn is running and either at least one sub-agent exists or a task list has been seen. A turn with neither shows no band.
 - **Label:** the first line of the user's prompt, shortened (task lists have no title in the tool data, so it is always the prompt).
@@ -42,7 +44,7 @@ From the Claude Code mods docs (overview, reference, events, interface, api):
   - Otherwise: `Agents finished/spawned`.
   - The label in the pill says which source is in use.
 - **Percent:** done ÷ total for whichever source is active.
-- **Mascot count:** sub-agents currently running.
+- **Running count:** `N running`, the sub-agents currently running. Left out entirely when the turn has no sub-agents (a task-list-only turn); reads `0 running` once every sub-agent has ended.
 - **After the turn ends:** the last state stays visible until the next prompt. `×` hides the band until the next prompt.
 
 ### Agents panel

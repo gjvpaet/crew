@@ -51,6 +51,10 @@ test('the band shows agent progress and hides on ×', async ($, on) => {
 	for (const surface of ['terminal', 'desktop'] as const) {
 		const ui = await $.ui.mount({ ...BAND, surface })
 		expect((await ui.find({ type: 'Text', text: /Agents 0\/2/ }))?.text).toContain('Agents 0/2')
+		expect((await ui.find({ type: 'Text', text: /running/ }))?.text).toBe('2 running')
+		// Desktop drops trailing spaces inside a Text, so the gaps come from the row, never from padding.
+		expect((await ui.find({ type: 'Text', text: /%/ }))?.text).toBe('0%')
+		expect((await ui.find({ type: 'Text', text: /Agents/ }))?.text).toBe('Agents 0/2')
 		await ui.unmount()
 	}
 	const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })

@@ -27,11 +27,32 @@ test('the band line fits its width', async () => {
 	const wide = bandLine(STATE, progress, 100)
 	expect(wide.pill).toBe('Agents 1/3')
 	expect(wide.percent).toBe('33%')
-	expect(wide.running).toBe(2)
+	expect(wide.runningLabel).toBe('2 running')
 	expect(wide.label).toBe('Build the launch kit for our new cold brew')
 	const narrow = bandLine(STATE, progress, 40)
 	expect(narrow.label.endsWith('…')).toBe(true)
 	expect((narrow.filled + narrow.empty).length).toBe(6)
+})
+
+test('the running count is hidden when the turn has no sub-agents', async () => {
+	const tasksOnly = reduce(reduce(EMPTY_STATE, { kind: 'turnStart', at: 1000, turnId: 't1', text: 'Plan the board' }), {
+		kind: 'tasks',
+		call: { tool: 'TodoWrite', input: { todos: [{ content: 'Read notes', status: 'in_progress', activeForm: 'x' }] } }
+	})
+	const progress = selectProgress(tasksOnly)
+	if (!progress) throw new Error('expected progress')
+	expect(progress.source).toBe('tasks')
+	expect(bandLine(tasksOnly, progress, 100).runningLabel).toBe('')
+})
+
+test('the running count reads 0 running once every sub-agent has ended', async () => {
+	const ended = ['a2', 'a3'].reduce(
+		(state, agentId) => reduce(state, { kind: 'turnEnd', at: 21_000, agentId, isAborted: false, reason: 'answer' }),
+		STATE
+	)
+	const progress = selectProgress(ended)
+	if (!progress) throw new Error('expected progress')
+	expect(bandLine(ended, progress, 100).runningLabel).toBe('0 running')
 })
 
 test('rows carry model, effort and the stats line', async () => {

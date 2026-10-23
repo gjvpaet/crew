@@ -21,24 +21,26 @@ export function registerBand(on: On, onViewport: (isFullscreen: boolean) => void
 		const { Box, Button, Text } = $.ui.resolve(e)
 		const line = bandLine(state, progress, e.props.bodyColumns)
 
+		// Desktop drops trailing spaces inside a Text, so every gap comes from the row's `gap`.
 		return (
-			<Box flexDirection="row">
-				<Text color={DOT[line.tone]}>● </Text>
+			<Box flexDirection="row" gap={1}>
+				<Text color={DOT[line.tone]}>●</Text>
 				<Text weight="semibold" wrap="truncate-end">
-					{line.label}{' '}
+					{line.label}
 				</Text>
-				<Text color="claude" mono>
-					{line.filled}
-				</Text>
-				<Text dimColor mono>
-					{line.empty}
+				<Text mono>
+					<Text color="claude">{line.filled}</Text>
+					<Text dimColor>{line.empty}</Text>
 				</Text>
 				<Text tabular wrap="truncate-end">
-					{' '}
-					{line.pill} {line.percent}{' '}
+					{line.pill}
 				</Text>
-				<Text color="suggestion">▣</Text>
-				<Text tabular>×{line.running} </Text>
+				<Text tabular>{line.percent}</Text>
+				{line.runningLabel && (
+					<Text dimColor tabular>
+						{line.runningLabel}
+					</Text>
+				)}
 				<Button key="hide" label="×" plain onPress={() => update($, isBandHidden, () => true)} />
 			</Box>
 		)
