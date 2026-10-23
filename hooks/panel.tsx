@@ -2,7 +2,6 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 
 import type { MascotPrefs } from '../types'
-import { clamp } from './format'
 import type { Species, SpriteCell } from './sprite'
 import { barSvg, pipHeight, pipSvg, pipWidth } from './svg'
 import { EMPTY_STATE } from './tracker'
@@ -29,8 +28,10 @@ const SPECIES_NAMES: Record<Species, string> = {
 	bloop: 'Bloop'
 }
 const BAR_PX = 6
-// A card's frame, its padding, the 8-cell sprite and the gap after it: what the text bar leaves to the rest.
+// A card's frame, its padding, the 8-cell sprite and the gap after it, and the side column with the time and its
+// mark (`12:34 ✗ stopped` at most) and the gap before it: what the terminal's text bar leaves to the rest.
 const CARD_CHROME = 13
+const SIDE_COLUMNS = 16
 
 const cellProps = (cell: SpriteCell) => ({
 	...(cell.fg ? { color: cell.fg } : {}),
@@ -50,8 +51,7 @@ export function registerPanel(on: On) {
 		const prefs = await read($, mascots)
 		const open = await read($, groupOpen)
 		const now = await $.clock.now()
-		const barColumns = Math.max(8, e.props.bodyColumns - CARD_CHROME)
-		const barPx = clamp(barColumns * 7, 120, 320)
+		const barColumns = Math.max(8, e.props.bodyColumns - CARD_CHROME - SIDE_COLUMNS)
 		const view = panelView(state, prefs, now, barColumns, open, { sprites: !Svg })
 
 		const card = (label: string, value: string) => (
@@ -95,18 +95,17 @@ export function registerPanel(on: On) {
 				<Svg
 					source={barSvg({
 						fraction: row.fraction ?? 0,
-						width: barPx,
 						height: BAR_PX,
 						color: row.accent,
 						now,
 						isShimmer: row.fraction === null
 					})}
 					alt={barAlt(row)}
-					width={barPx}
+					// No width: the drawing stretches to the text column, ending where the time's column begins.
 					height={BAR_PX}
 				/>
 			) : (
-				<Text color={row.accent} mono>
+				<Text color={row.accent} mono wrap="truncate-end">
 					{row.bar}
 				</Text>
 			)
@@ -123,24 +122,20 @@ export function registerPanel(on: On) {
 				marginBottom={1}
 			>
 				{mascot(row)}
-				<Box flexDirection="column" flexGrow={1}>
-					<Box flexDirection="row" justifyContent="space-between" gap={1}>
-						{/* The title gives way first; the time and the badge keep their width in a narrow pane. */}
+				{/* width 0 + flexGrow 1: the text column takes what the mascot and the side column leave, and no more. */}
+				<Box flexDirection="column" flexGrow={1} width={0}>
+					<Box flexDirection="row" gap={1}>
+						{/* The title gives way first; Main's waiting note keeps its width beside it. */}
 						<Box flexShrink={1}>
 							<Text weight="semibold" wrap="truncate-end">
 								{row.title}
 							</Text>
 						</Box>
-						<Box flexDirection="row" gap={1} flexShrink={0}>
-							<Text dimColor tabular>
-								{row.elapsed}
-							</Text>
-							{row.badge && (
-								<Text color={TONE[row.tone]} wrap="truncate-end">
-									{row.badge}
-								</Text>
-							)}
-						</Box>
+						{row.waiting && (
+							<Box flexShrink={0}>
+								<Text color={TONE[row.tone]}>{row.waiting}</Text>
+							</Box>
+						)}
 					</Box>
 					{/* One Text, so the whole line truncates as a unit instead of wrapping a piece into the next column. */}
 					<Text dimColor wrap="truncate-end">
@@ -151,6 +146,13 @@ export function registerPanel(on: On) {
 					</Text>
 					{row.steps && <Text wrap="truncate-end">{row.steps}</Text>}
 					{progress(row)}
+				</Box>
+				{/* The time and its mark in a column of their own, so the text column (and the bar) end where it begins. */}
+				<Box flexDirection="row" gap={1} flexShrink={0}>
+					<Text dimColor tabular>
+						{row.elapsed}
+					</Text>
+					{row.badge && <Text color={TONE[row.tone]}>{row.badge}</Text>}
 				</Box>
 			</Box>
 		)

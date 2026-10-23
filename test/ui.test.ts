@@ -139,7 +139,7 @@ test('on desktop every agent card draws Pip and its bar as SVG', async ($, on) =
 	expect(bars).toHaveLength(3)
 	// Running with no steps: a shimmer in the agent's own accent.
 	const [research] = await svgs(ui, /^Research competitor launches progress/)
-	expect(String(research?.props.source)).toContain('class="shimmer"')
+	expect(String(research?.props.source)).toContain('class="shimmer')
 	expect(String(research?.props.source)).toContain('#1D9E75')
 	const [landing] = await svgs(ui, /^Build the landing page progress/)
 	expect(String(landing?.props.source)).toContain('#7F77DD')
@@ -651,4 +651,29 @@ test('Claude can open the Agents panel with the open_panel tool', async ($, on) 
 	const unplaced = await $.tool.call({ tool: 'mcp__crew__open_panel' } as any)
 	expect(unplaced.result).toEqual({ ok: true, isPlaced: false })
 	expect(toasts.some(text => text.includes('/crew'))).toBe(true)
+})
+
+test('a card keeps its time and mark in a column of their own, and its bar fills the text column', async ($, on) => {
+	await startTwoAgents($, on)
+	const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	const card = await ui.find({ key: 'row-a1' })
+	const kids = (card?.children ?? []) as any[]
+	// Pip, the text column, the side column with the time.
+	expect(kids).toHaveLength(3)
+	const [, text, side] = kids
+	expect(text.props.flexGrow).toBe(1)
+	expect(JSON.stringify(side)).toMatch(/\d+:\d\d/)
+	expect(JSON.stringify(text)).not.toMatch(/"\d+:\d\d"/)
+	// Main's waiting note stays in the text column, so the side column never grows wide.
+	await $.turn.complete({ turnId: 't1', answer: 'x', durationMs: 1, isAborted: false, reason: 'answer' } as any)
+	const main = (await ui.find({ key: 'row-main' }))?.children as any[]
+	expect(JSON.stringify(main?.[1])).toContain('waiting on 2 agents')
+	expect(JSON.stringify(main?.[2])).not.toContain('waiting on')
+	expect(side.props.flexShrink).toBe(0)
+	// The bar takes the text column's width: no width of its own, the drawing stretched to fit.
+	const [bar] = await svgs(ui, /^Research competitor launches progress/)
+	expect(bar?.props.width).toBeUndefined()
+	expect(bar?.props.height).toBe(6)
+	expect(JSON.stringify(text)).toContain('Research competitor launches progress')
+	await ui.unmount()
 })

@@ -216,7 +216,9 @@ test('Main waits on its running agents, then shows done', async () => {
 	expect(waiting?.tone).toBe('waiting')
 	expect(waiting?.mark).toBe('')
 	expect(waiting?.note).toBe('waiting on 2 agents')
-	expect(waiting?.badge).toBe('waiting on 2 agents')
+	// The side column keeps only the short mark; the waiting note rides beside the title.
+	expect(waiting?.badge).toBe('')
+	expect(waiting?.waiting).toBe('waiting on 2 agents')
 	expect(waiting?.aside).toBe('')
 	// Main keeps moving while it waits.
 	expect(waiting?.fraction).toBeNull()
@@ -266,7 +268,7 @@ test('a row keeps its mark on line one and its note beside the model', async () 
 	expect(finished?.aside).toBe('')
 })
 
-test('the badge on line one is held to about 20 characters', async () => {
+test('the waiting note beside the title is held to about 20 characters', async () => {
 	const many = ['d1', 'd2', 'd3', 'd4', 'd5', 'd6', 'd7', 'd8', 'd9', 'd10'].reduce(
 		(state, id) => reduce(state, spawn(id, `Job ${id}`)),
 		STATE
@@ -274,7 +276,8 @@ test('the badge on line one is held to about 20 characters', async () => {
 	const ended = reduce(many, { kind: 'turnEnd', at: 21_000, isAborted: false, reason: 'answer' })
 	const main = panelView(ended, {}, 30_000, 20, {}).main
 	expect(main?.note).toBe('waiting on 12 agents')
-	expect(main?.badge.length).toBeLessThanOrEqual(20)
+	expect(main?.waiting.length).toBeLessThanOrEqual(20)
+	expect(main?.badge).toBe('')
 })
 
 test('rows skip the half-block sprite where the surface draws SVG', async () => {

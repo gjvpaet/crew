@@ -1,10 +1,11 @@
 import { expect, test } from 'claude-code/testing'
 
 import { PALETTE, spriteCells, spriteGrid, spritePixels } from '../hooks/sprite'
-import { bandBarSvg, barSvg, escapeXml, pipHeight, pipSvg, pipWidth } from '../hooks/svg'
+import { BAR_NATIVE_WIDTH, bandBarSvg, barSvg, escapeXml, pipHeight, pipSvg, pipWidth } from '../hooks/svg'
 
 const rects = (svg: string) => svg.match(/<rect\b[^>]*>/g) ?? []
-const part = (svg: string, name: string) => rects(svg).find(rect => rect.includes(`class="${name}"`))
+const part = (svg: string, name: string) =>
+	rects(svg).find(rect => rect.includes(`class="${name}"`) || rect.includes(`class="${name} `))
 const attr = (tag: string | undefined, name: string) => {
 	const match = tag ? new RegExp(`\\s${name}="([^"]*)"`).exec(tag) : null
 	return match ? match[1] : undefined
@@ -54,41 +55,56 @@ test('pipSvg follows the mascot prefs', async () => {
 	expect(svg).not.toContain(`fill="${PALETTE.body}"`)
 })
 
-test('barSvg fills in proportion to the fraction, clamped', async () => {
-	const half = barSvg({ fraction: 0.5, width: 200, height: 6, color: '#1D9E75' })
+const pct = (value: string | undefined) => parseFloat(String(value))
+
+test('barSvg stretches to its column: lengths in percent, no fixed width', async () => {
+	const half = barSvg({ fraction: 0.5, height: 6, color: '#1D9E75' })
 	expect(isWellFormed(half)).toBe(true)
+	// Drawn at a nominal width the surface scales down to the column it is given.
+	expect(half).toContain(`width="${BAR_NATIVE_WIDTH}" height="6"`)
 	const track = part(half, 'track')
-	expect(attr(track, 'width')).toBe('200')
-	expect(attr(track, 'rx')).toBe('3')
+	expect(attr(track, 'width')).toBe('100%')
 	expect(attr(track, 'fill')).toBe('rgba(128,128,128,0.25)')
 	const fill = part(half, 'fill')
-	expect(attr(fill, 'width')).toBe('100')
-	expect(attr(fill, 'rx')).toBe('3')
+	expect(attr(fill, 'width')).toBe('50%')
 	expect(attr(fill, 'fill')).toBe('#1D9E75')
-	expect(attr(part(barSvg({ fraction: 1.7, width: 200, height: 6, color: '#000000' }), 'fill'), 'width')).toBe('200')
-	expect(attr(part(barSvg({ fraction: -1, width: 200, height: 6, color: '#000000' }), 'fill'), 'width')).toBe('0')
+	expect(attr(part(barSvg({ fraction: 1.7, height: 6, color: '#000000' }), 'fill'), 'width')).toBe('100%')
+	expect(attr(part(barSvg({ fraction: -1, height: 6, color: '#000000' }), 'fill'), 'width')).toBe('0%')
 	expect(part(half, 'shimmer')).toBeUndefined()
 })
 
+test('a stretched bar keeps round ends at any width it is drawn', async () => {
+	const svg = barSvg({ fraction: 0.5, height: 6, color: '#1D9E75' })
+	// The ends' radius is height / 2 across, scaled back by how far the drawing is squeezed: one rule per 20px of
+	// drawn width, from 60px to the nominal width, so a 300px bar's ends are as round as a 1200px bar's.
+	expect(svg).toContain('@media (max-width: 300px)')
+	expect(svg).toContain('@media (max-width: 1200px)')
+	const rule = (px: number) => new RegExp(`@media \\(max-width: ${px}px\\) \\{ \\.end \\{ rx: ([\\d.]+)px; \\} \\}`).exec(svg)?.[1]
+	expect(Number(rule(300))).toBe(20)
+	expect(Number(rule(1200))).toBe(5)
+	// Vertically nothing is squeezed: the attribute radius is the height's half.
+	expect(attr(part(svg, 'track'), 'ry')).toBe('3')
+	expect(part(svg, 'track')).toContain('class="track end"')
+	expect(part(svg, 'fill')).toContain('class="fill end"')
+})
+
 test('barSvg shimmer moves with the clock and is the same for the same moment', async () => {
-	const at = (now: number) => barSvg({ fraction: 0, width: 200, height: 6, color: '#7F77DD', now, isShimmer: true })
+	const at = (now: number) => barSvg({ fraction: 0, height: 6, color: '#7F77DD', now, isShimmer: true })
 	const first = part(at(1000), 'shimmer')
 	expect(first).toBeDefined()
 	expect(attr(part(at(2000), 'shimmer'), 'x')).not.toBe(attr(first, 'x'))
 	expect(at(1000)).toBe(at(1000))
 })
 
-test('the shimmer only steps right, one tick at a time, then wraps, on narrow and wide bars', async () => {
-	for (const width of [120, 320]) {
-		const x = (now: number) =>
-			Number(attr(part(barSvg({ fraction: 0, width, height: 6, color: '#7F77DD', now, isShimmer: true }), 'shimmer'), 'x'))
-		const sweep = [0, 1, 2, 3, 4, 5].map(second => x(10_000 * 6 + second * 1000))
-		for (let i = 1; i < sweep.length; i++) expect(sweep[i]).toBeGreaterThan(sweep[i - 1])
-		// The next second wraps to the start; a tick anywhere inside a second draws the same place.
-		expect(x(66_000)).toBe(sweep[0])
-		expect(x(60_999)).toBe(sweep[0])
-		expect(sweep[5]).toBe(width)
-	}
+test('the shimmer only steps right, one tick at a time, then wraps', async () => {
+	const x = (now: number) => pct(attr(part(barSvg({ fraction: 0, height: 6, color: '#7F77DD', now, isShimmer: true }), 'shimmer'), 'x'))
+	const sweep = [0, 1, 2, 3, 4, 5].map(second => x(10_000 * 6 + second * 1000))
+	for (let i = 1; i < sweep.length; i++) expect(sweep[i]).toBeGreaterThan(sweep[i - 1])
+	// The next second wraps to the start; a tick anywhere inside a second draws the same place.
+	expect(x(66_000)).toBe(sweep[0])
+	expect(x(60_999)).toBe(sweep[0])
+	expect(sweep[5]).toBe(100)
+	expect(sweep[0]).toBe(-30)
 })
 
 test('bandBarSvg draws the pill centred inside the bar, its text escaped', async () => {

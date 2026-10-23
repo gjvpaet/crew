@@ -113,31 +113,67 @@ function drawPip(role: Role, prefs: MascotPrefs, size: number, look: Look): stri
 	return `<svg xmlns="${XMLNS}" viewBox="${VIEW.x} ${VIEW.y} ${VIEW.width} ${VIEW.height}" width="${num(pipWidth(size))}" height="${num(pipHeight(size))}" shape-rendering="crispEdges">${faded}</svg>`
 }
 
-export type BarSvgInput = { fraction: number; width: number; height: number; color: string; now?: number; isShimmer?: boolean }
+export type BarSvgInput = { fraction: number; height: number; color: string; now?: number; isShimmer?: boolean }
 
 const SHIMMER_SHARE = 0.3
 // The surface redraws once a second, so the sweep steps: six places, each a fifth of the travel further right.
 const SHIMMER_STEPS = 6
 
-// The track and the fill, shared by the agent bar and the band bar.
+// The band bar's track and fill, in pixels.
 function trackAndFill(fraction: number, width: number, height: number, color: string) {
 	return rect('track', 0, width, 0, height, TRACK) + rect('fill', 0, clamp(fraction, 0, 1) * width, 0, height, color)
 }
 
-export function barSvg({ fraction, width, height, color, now = 0, isShimmer = false }: BarSvgInput): string {
+// An agent's bar has no width of its own: drawn this wide and stretched (preserveAspectRatio none) to the column the
+// surface gives it, its lengths in percent. Stretching squeezes the round ends sideways, so a rule per 20px of drawn
+// width sets the horizontal radius back to what reads as height / 2 at that width.
+export const BAR_NATIVE_WIDTH = 2000
+const END_RULE_STEP = 20
+const END_RULE_FROM = 60
+// For a surface that ignores the rules: ends sized for a 300px column, the usual pane.
+const END_FALLBACK_PX = 300
+
+const endRadius = (height: number, drawnPx: number) => num(((height / 2) * BAR_NATIVE_WIDTH) / drawnPx)
+
+const END_RULES = new Map<number, string>()
+
+// Widest first, so at a given width the narrowest rule that still matches comes last and wins.
+function endRules(height: number): string {
+	const cached = END_RULES.get(height)
+	if (cached !== undefined) return cached
+	let rules = ''
+	for (let px = BAR_NATIVE_WIDTH; px >= END_RULE_FROM; px -= END_RULE_STEP) {
+		rules += `@media (max-width: ${px}px) { .end { rx: ${endRadius(height, px)}px; } }`
+	}
+	END_RULES.set(height, rules)
+	return rules
+}
+
+function stretchRect(name: string, xPct: number, widthPct: number, height: number, fill: string, extra = '') {
+	return (
+		`<rect class="${name} end" x="${num(xPct)}%" y="0" width="${num(widthPct)}%" height="${num(height)}" ` +
+		`rx="${endRadius(height, END_FALLBACK_PX)}" ry="${num(height / 2)}" fill="${fill}"${extra}/>`
+	)
+}
+
+export function barSvg({ fraction, height, color, now = 0, isShimmer = false }: BarSvgInput): string {
 	let shimmer = ''
 	if (isShimmer) {
 		// A segment stepping left to right, from just off the track's start to just past its end; its place is a
-		// function of the whole second of `now`, so a narrow bar never seems to run backwards between redraws.
-		const segment = width * SHIMMER_SHARE
-		const travel = width + segment
+		// function of the whole second of `now`, so it never seems to run backwards between redraws.
+		const segment = 100 * SHIMMER_SHARE
+		const travel = 100 + segment
 		const step = Math.floor(now / 1000) % SHIMMER_STEPS
 		const x = (step / (SHIMMER_STEPS - 1)) * travel - segment
 		shimmer =
-			`<clipPath id="track"><rect x="0" y="0" width="${num(width)}" height="${num(height)}" rx="${num(height / 2)}"/></clipPath>` +
-			rect('shimmer', x, segment, 0, height, color, ' fill-opacity="0.55" clip-path="url(#track)"')
+			`<clipPath id="track">${stretchRect('clip', 0, 100, height, '#000')}</clipPath>` +
+			stretchRect('shimmer', x, segment, height, color, ' fill-opacity="0.55" clip-path="url(#track)"')
 	}
-	return `${svgOpen(width, height)}${trackAndFill(fraction, width, height, color)}${shimmer}</svg>`
+	const open =
+		`<svg xmlns="${XMLNS}" viewBox="0 0 ${BAR_NATIVE_WIDTH} ${num(height)}" width="${BAR_NATIVE_WIDTH}" ` +
+		`height="${num(height)}" preserveAspectRatio="none">`
+	const body = stretchRect('track', 0, 100, height, TRACK) + stretchRect('fill', 0, clamp(fraction, 0, 1) * 100, height, color)
+	return `${open}<style>${endRules(height)}</style>${body}${shimmer}</svg>`
 }
 
 export type BandBarSvgInput = {

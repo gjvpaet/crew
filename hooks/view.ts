@@ -87,10 +87,12 @@ export type RowView = {
 	usageText: string
 	elapsed: string
 	steps: string
-	// Every note in one line; `badge` and `aside` are where the card draws it.
+	// Every note in one line; `badge`, `waiting` and `aside` are where the card draws it.
 	note: string
-	// Line one's right: ✓, ✗, or Main's `waiting on N agents`, held to BADGE_MAX characters.
+	// The side column under the time: ✓, ✗ or `✗ stopped`, short enough that the column stays narrow.
 	badge: string
+	// Beside the title: Main's `waiting on N agents`, held to BADGE_MAX characters.
+	waiting: string
 	// Beside the model on line two: `stopped`, `↳ from <parent>`.
 	aside: string
 	bar: string
@@ -230,7 +232,8 @@ function rowView(
 		elapsed,
 		steps: steps ? `${steps.done}/${steps.total}${steps.current ? ` · ${steps.current}` : ''}` : '',
 		note: isMainWaiting ? waitingNote : [...asides, agent.status === 'stopped' ? 'stopped' : ''].filter(Boolean).join(' · '),
-		badge: markBadge || truncate(waitingNote, BADGE_MAX),
+		badge: markBadge,
+		waiting: truncate(waitingNote, BADGE_MAX),
 		aside: isMainWaiting ? '' : asides.join(' · '),
 		bar: fraction === null ? shimmer(barWidth, now) : bar(fraction, barWidth),
 		fraction,
