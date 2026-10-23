@@ -1,0 +1,6 @@
+{
+	"name": "crew",
+	"version": "0.1.0",
+	"description": "Progress band above the prompt and a live Agents pane with model, tokens and estimated cost per sub-agent.",
+	"types": "./types/index.d.ts"
+}
