@@ -21,22 +21,32 @@ Copy this checklist into the task list and tick it off as you go:
 - [ ] `superpowers:brainstorming`: design agreed with the user, spec written
 - [ ] `superpowers:writing-plans`: implementation plan written (brainstorming hands off here)
 - [ ] `superpowers:using-git-worktrees`: isolated worktree ready before any code changes
-- [ ] `superpowers:subagent-driven-development`: tasks built by sub-agents, each one reviewed
+- [ ] `superpowers:subagent-driven-development`: tasks built by sub-agents in parallel waves where they're independent, each one reviewed
 - [ ] Browser verification in the user's default browser (when the change shows up in a browser)
 
 Rules for each stage:
 
 - **Brainstorming.** Its hard gate stands: no code until the user approves the design. Ask the user to choose; never assume.
-- **Writing plans.** Put the plan where that skill says, unless the user or the repo's CLAUDE.md names another place.
+- **Writing plans.** Put the plan where that skill says, unless the user or the repo's CLAUDE.md names another place. Give every task a `Depends on:` line (task numbers, or `none`) next to its `Files:` list, so the parallel waves below can be read straight off the plan.
 - **Worktrees.** Create or confirm the worktree before the first implementer runs. Never build on `main`/`master` without the user's explicit consent.
-- **Subagent-driven development.** One implementer per task, then spec review, then quality review. Keep sub-agents on that skill's prompt templates.
+- **Subagent-driven development.** One implementer per task, then spec review, then quality review. Keep sub-agents on that skill's prompt templates. Run independent tasks in parallel, as described below.
+
+## Run independent sub-agents in parallel
+
+This replaces subagent-driven-development's "never dispatch implementers in parallel" rule, but only for tasks that can't collide:
+
+1. **Group the plan into waves.** A task joins the current wave when every task it depends on is finished, reviewed and merged, and it shares no file with another task in the wave. Everything else waits for a later wave. If you can't tell whether two tasks are independent, run them one after the other.
+2. **Dispatch a wave in one message.** Send one Agent call per implementer in the same message so they run at the same time. Give each implementer `isolation: "worktree"`, so the implementers' test runs and commits can't collide.
+3. **Review in parallel too.** Each task still goes implementer → spec review → quality review, in that order. Different tasks' reviews can run side by side. Reviewers only read, so they don't need a worktree of their own.
+4. **Merge back in plan order.** Once a task passes both reviews, merge its branch into the feature worktree. Merge in task-number order. Run the full test suite after each wave before starting the next one. A merge conflict means two tasks weren't independent after all: resolve it, and run tasks like those one after the other from then on.
+5. **One wave at a time.** Don't start a task whose dependency is still being built or reviewed, even if every other task is idle.
 
 ## Keep Crew showing the work
 
 Crew draws from the task list and the sub-agents, so keep both honest:
 
 - Mirror the plan's tasks in the app's task list: `mcp__ccd_turn__update_plan` in the desktop app, `TodoWrite`/`TaskCreate` elsewhere. Advance it as each task finishes. Crew turns this into Main's progress bar and its Planned section.
-- Give each sub-agent a short, specific `description` (for example "Implement Task 3: parser"). Crew uses it as the card title.
+- Give each sub-agent a short, specific `description` (for example "Implement Task 3: parser"). Crew uses it as the card title, and with a wave running side by side, distinct titles are how the user tells the cards apart.
 - Crew asks every sub-agent to keep its own task list, which becomes that card's progress bar. Leave that note in their prompts.
 
 ## Browser verification: the user's real default browser
