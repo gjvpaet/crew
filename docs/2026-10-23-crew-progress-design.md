@@ -1,7 +1,7 @@
 # Crew — progress band + live agents panel (design)
 
 Date: 2026-10-23
-Status: approved in brainstorming, awaiting spec review
+Status: implemented on branch build/v0.1, awaiting live check
 
 A personal Claude Code mod, inspired by the community "Savvy Progress" mod: a progress band above the prompt and a live panel of every sub-agent with its model, tokens and an estimated cost, each drawn with a small original pixel mascot.
 
@@ -18,11 +18,14 @@ From the Claude Code mods docs (overview, reference, events, interface, api):
 - Mods run in the terminal (≥ 2.1.287) and the Desktop Code tab (≥ 2.1.286). Not in `claude -p`, cloud or WSL desktop sessions.
 - Surfaces: `AbovePrompt` band (terminal + Desktop), a pane that docks beside the transcript at ≥ 800px and sits inline above the prompt below that, plus status line, toast and log.
 - There is no progress-bar primitive. Bars are built from `Box` and `Text`. `Raster`/`Image` are terminal-only and `Svg` is Desktop-only, so the sprite uses block cells, which render in both.
-- Events: `agent.spawn` (carries the model), `turn.step` (carries `result.usage` and `result.model`, tagged by `agentId`), `turn.start`, `turn.complete` (`durationMs`, `usage`, `isAborted`, tagged by `agentId` for sub-agents).
+- Events: `agent.spawn` (the model comes back on the result of `next`), `turn.step` (carries `result.usage`, `result.model` and `effort`, tagged by `agentId`), `turn.start`, `turn.complete` (`durationMs`, `usage`, `isAborted`, tagged by `agentId` for sub-agents).
+- `tool.call` sees `TodoWrite`, `TaskCreate`, `TaskUpdate` and `mcp__ccd_turn__update_plan`, with `agentId` set for sub-agents. That is what feeds task progress.
 - `$.agent.list()` returns `id, description, type, status, parentId, spawnedBy, name`. Status is one of `pending | running | waiting | idle | completed | failed | killed`.
-- Not documented: a task-list/todo event, per-agent reasoning effort, a pricing source. The design treats all three as optional or self-supplied.
+- Not documented: a task-list/todo event and a pricing source. The task list is read from `tool.call` (above) and prices are self-supplied.
 - Storage: `$.state` lasts the session and survives hot reload (reset by `/clear`, `/resume`, `/branch`). `$.store` is a JSON store shared by every session on the machine.
-- The hooks module has no Node APIs (use `$.fs`, `$.process`, `$.http`). It is plain ES modules with no build step.
+- The hooks module has no Node APIs (use `$.fs`, `$.process`, `$.http`). It is TypeScript (`.ts`/`.tsx`) ES modules that the engine loads directly, with no build step.
+- The engine's static scan follows `$.state` refs only through consts in the same file, so each `.tsx` declares its own `atom(...)`. Helpers that take `$` must be top-level function declarations.
+- Gating hooks (`agent.spawn`, `tool.call`) carry `.catch(($, e, next) => next(e))`, so a Crew error never blocks a spawn or a tool call.
 
 ## What the user sees
 
@@ -33,18 +36,18 @@ From the Claude Code mods docs (overview, reference, events, interface, api):
 ```
 
 - **Shown when** a turn is running and either at least one sub-agent exists or a task list has been seen. A turn with neither shows no band.
-- **Label:** the task list's title when visible, otherwise the first line of the user's prompt, shortened.
+- **Label:** the first line of the user's prompt, shortened (task lists have no title in the tool data, so it is always the prompt).
 - **Count (Hybrid source):**
   - When task-list tool calls are visible: `Tasks done/total`.
   - Otherwise: `Agents finished/spawned`.
   - The label in the pill says which source is in use.
 - **Percent:** done ÷ total for whichever source is active.
 - **Mascot count:** sub-agents currently running.
-- **After the turn ends:** the last state stays visible until the next prompt. `×` hides the band until the next turn that would show it.
+- **After the turn ends:** the last state stays visible until the next prompt. `×` hides the band until the next prompt.
 
 ### Agents panel
 
-- **Header cards:** ≈Cost · Tokens · Time for the current turn. A small line underneath shows session totals.
+- **Header cards:** ≈Cost · Tokens · Time for the current turn only (requests are tracked per model in `turnByModel`). A small line underneath shows session totals. When some model has no price, the header cost is a partial sum marked `+`.
 - **Groups, in order:**
   - Running
   - Waiting (`pending`, `waiting`, `idle`)
@@ -53,29 +56,29 @@ From the Claude Code mods docs (overview, reference, events, interface, api):
 - **Each row:**
   - mascot and description
   - model, plus effort only when the event data includes it (never inferred)
-  - tokens · ctx % · ≈$ · elapsed
+  - tokens · ctx % · ≈$ · elapsed, for that agent's lifetime usage
   - a bar that shimmers while running and fills at the end, with ✓ (finished) or ✗ (failed or stopped)
   - per-agent step progress (`3/5 · step name`) only when that agent's own task-list calls are visible
-- **A Main row** for the lead agent, so the rows sum to the header totals.
-- **Many agents:** with more than 8 rows, Finished collapses to a single expandable `Finished · N` line.
+- **A Main row** for the lead agent. Main starts from zero each turn, so it matches the header; a sub-agent that carries over from an earlier turn shows its lifetime usage, so the rows can exceed the header totals.
+- **Many agents:** with more than 8 sub-agents (Main not counted), Finished collapses to a single expandable `Finished · N` line.
 - **Nested agents:** listed flat, with `↳ from <parent description>` taken from `parentId`.
 
 ### Mascots
 
-- One **original** 8×8 pixel character created for this mod. It is not based on any existing mascot or brand character, including the crabs in the inspiring mod and Anthropic's mascot.
-- Drawn as block cells so the terminal and Desktop render it the same way.
+- One **original** 8×8 pixel character, "Pip", created for this mod: a round bean body with dot eyes and stubby feet. It is not based on any existing mascot or brand character, including the crabs in the inspiring mod and Anthropic's mascot.
+- Drawn as half-block cells (4 rows of 8) so the terminal and Desktop render it the same way.
 - Accessory by role:
 
   | Role | Accessory |
   |---|---|
   | Developer | Headset |
   | Designer | Beret |
-  | Researcher | Magnifier |
+  | Researcher | Glasses |
   | Reviewer | Hard hat |
   | Plain | None |
 
-- The role comes from the agent's `type` first, then keywords in its `description` (see `roles.js`).
-- **Restyling:** the user asks Claude, which writes the choice into the `$.store` key `crew.mascots`. The role → accessory/colour overrides apply across sessions.
+- The role comes from the agent's `type` first, then keywords in its `description` (see `roles.ts`).
+- **Restyling:** the user asks Claude, which calls the model-callable tool `mcp__crew__set_mascot` (inputs: `role`, `accessory`, `body` and `accent` as `#RRGGBB`, or `reset`). The mod answers the call itself (it never reaches a real tool) and persists the role's overrides in the `$.store` key `mascots`. They are loaded on `session.start` and apply across sessions. Bad input is refused with a message that names the valid values.
 
 ## Architecture
 
@@ -83,35 +86,52 @@ Each unit has one job. The calculating units import nothing from the UI and are 
 
 | Unit | Responsibility | Depends on |
 |---|---|---|
-| `tracker.js` | A pure reducer: `(state, event) → state`. Holds the current turn, task-list snapshot and an `agents` map keyed by agent id: `description, type, role, model, effort?, status, parentId, spawnedAt, endedAt, usage {input, output, cacheRead, cacheWrite}, lastRequestInput, steps?`. Also exports derived selectors for progress, totals and groups. | `roles.js` |
-| `pricing.js` | Price table per model family × {input, output, cacheRead, cacheWrite} per MTok, with an `asOf` date. `estimate(usage, model)` returns `null` for unknown models. `contextWindow(model)` returns 1M for `[1m]` variants and 200k otherwise. | none |
-| `roles.js` | `roleFor({type, description})` returns `developer | designer | researcher | reviewer | plain`. | none |
-| `sprite.js` | The base 8×8 grid plus accessory overlays and colours. Returns rows of cells. | none |
-| `band.js` | Draws the `AbovePrompt` band from tracker selectors. | `tracker.js`, `sprite.js` |
-| `panel.js` | Draws the dock/inline Agents pane from tracker selectors. | `tracker.js`, `sprite.js`, `pricing.js` |
-| `index.js` | `register(on, options)`: subscribes to events, feeds the tracker, keeps state in `$.state`, loads mascot overrides from `$.store`, triggers re-draws. | all |
+| `tracker.ts` | A pure reducer: `(state, event) → state`. Holds the current turn, the main task list, per-agent task lists, an `agents` map keyed by agent id (`description, type, role, model, effort?, status, parentId, spawnedAt, endedAt, usage {input, output, cacheRead, cacheWrite}, lastRequestInput, steps?`), per-model usage for the session and for the turn (`sessionByModel`, `turnByModel`) and `known`, the identity of every agent seen. Also exports derived selectors for progress, totals and groups. | `roles.ts`, `pricing.ts`, `tasks.ts` |
+| `tasks.ts` | Turns task-list tool calls (`TodoWrite`, `TaskCreate`, `TaskUpdate`, `mcp__ccd_turn__update_plan`) into a task list and `{done, total, current}`. | none |
+| `pricing.ts` | Per-model price table (input, output, cacheRead, cacheWrite per MTok, plus context window) with an `asOf` date. `estimateUsd(usage, model)` returns `null` for unknown models. `contextWindow(model)` comes from the same table. | none |
+| `roles.ts` | `roleFor({type, description})` returns `developer | designer | researcher | reviewer | plain`. | none |
+| `sprite.ts` | The base 8×8 grid plus accessory overlays and colours. Returns rows of half-block cells. | none |
+| `mascot.ts` | The `set_mascot` tool spec, input validation and the pure function that applies a change to the saved prefs. | none |
+| `format.ts` | Display helpers: token, ≈$, duration and percent formatting, text bars, the running shimmer, truncation, model names. | none |
+| `view.ts` | Pure view models: `bandLine` and `panelView` (rows, groups, header cards) built from tracker selectors. | `tracker.ts`, `sprite.ts`, `pricing.ts`, `format.ts` |
+| `band.tsx` | Draws the `AbovePrompt` band from `view.ts`. | `tracker.ts`, `view.ts` |
+| `panel.tsx` | Draws the dock/inline Agents pane from `view.ts`. | `tracker.ts`, `view.ts`, `sprite.ts` |
+| `register.tsx` | `register(on)`: subscribes to events, feeds the tracker, keeps state in `$.state`, registers the `/crew` command and the `set_mascot` tool, loads mascot overrides from `$.store` on `session.start`, opens the pane on the first spawn, and installs the band and pane renderers. Listed in `hooks/hooks.json`. | all |
+
+The `$.state` contract (state types, `PluginState`) lives in `types/index.d.ts`.
 
 ### Data flow
 
-1. `turn.start` (main agent): opens a new turn and resets per-turn totals. Session totals keep accumulating.
-2. `agent.spawn`: adds the agent with its model, role, `spawnedAt` and status `running` (or `pending` if the event says it hasn't started).
-3. `turn.step`: adds `result.usage` to that agent (the main agent when there is no `agentId`), sets the model if missing, and records `lastRequestInput = input + cacheRead + cacheWrite` for ctx %.
-4. `turn.complete` with an `agentId`: marks that agent `completed` and sets `endedAt`. Without one (the main turn): marks the turn finished. If `isAborted`, agents still running become *stopped*.
-5. On each `turn.step`, reconcile against `$.agent.list()` to pick up `waiting`, `failed` and `killed` statuses that no event announces.
-6. Task-list tool calls, if the mod can observe tool use: parse the tool input into `{title, done, total}` for the turn (or into `steps` for a sub-agent). Candidate tools: TodoWrite, TaskCreate/TaskUpdate, and the Desktop app's plan tool. Which ones are observable is confirmed in the first build step. If none are, the band uses the agents count only.
+1. `turn.start` (main agent): opens a new turn with a fresh Main row and resets the per-turn totals. Session totals keep accumulating, and sub-agents that are still live carry over.
+2. `agent.spawn`: after `next` returns the new agent id and model, adds the agent with its role and `spawnedAt`, status `running`. The first spawn also opens the pane.
+3. `turn.step`: adds `result.usage` to that agent (the main agent when there is no `agentId`), to the session and turn totals for that model, sets the model and effort, and records `lastRequestInput = input + cacheRead + cacheWrite` for ctx %.
+4. `turn.complete` with an `agentId`: marks that agent `completed` (or `failed` on an error or refusal) and sets `endedAt`. Without one (the main turn): marks the turn finished. If `isAborted`, agents still `running` or `pending` become *stopped*.
+5. On each `turn.step`, once any sub-agent exists, reconcile against `$.agent.list()` to pick up `waiting`, `idle`, `failed` and `killed` statuses that no event announces.
+6. `tool.call` for a task-list tool (when it was not denied and did not error): parse the input into the turn's task list, or into `steps` for a sub-agent. If no task list is seen, the band uses the agents count only. `mcp__crew__set_mascot` is handled here too.
+
+Tracker behaviours worth knowing:
+
+- An empty-text main `turn.start` is a continuation: it reopens the turn and Main instead of starting a new turn.
+- Agent identity (`known`) survives prompts, so a resumed agent keeps its name and role.
+- An abort stops only `running` and `pending` agents.
+- A step that carries usage revives a stopped agent.
+- The status list never moves an ended agent back to live.
+- `idle` counts as done for band progress, but shows under Waiting in the pane.
+- Usage fields are missing-safe: an absent or null field counts as 0, so a partial usage object never produces NaN totals. (A literal NaN is not filtered.)
 
 ### Cost and ctx %
 
 - `≈$ = Σ tokens × price` per type, using cache-read and cache-write prices for cached tokens.
 - Always prefixed with `≈`. Unknown model gives `≈?`.
-- Prices are taken from the current Claude pricing reference at build time (not from memory) and stamped with `asOf`.
-- `ctx % = lastRequestInput ÷ contextWindow(model)`.
+- Prices are taken from the current Claude pricing reference at build time (not from memory) and stamped with `asOf` (2026-10-06). Cache writes use the 5-minute rate.
+- `ctx % = lastRequestInput ÷ contextWindow(model)`. The window comes from the per-model table: 1M for every current model, 200k only for Haiku 4.5 and unknown models.
+- Header totals cover this turn's requests only. Per-agent rows show that agent's lifetime usage.
 
 ## Edge cases
 
 | Case | Behaviour |
 |---|---|
-| Unknown or new model | Tokens still count, cost shows `≈?`, and ctx % uses the 200k window. |
+| Unknown or new model | Tokens still count, cost shows `≈?` (the header shows a partial sum marked `+`), and ctx % uses the 200k window. |
 | Aborted turn | Running agents are marked *stopped* (Failed group, ✗) and their clocks freeze. |
 | No sub-agents and no visible task list | No band. The panel shows only the Main row. |
 | Hot reload | State lives in `$.state`, so nothing is lost when the module reloads. |
@@ -121,10 +141,11 @@ Each unit has one job. The calculating units import nothing from the UI and are 
 
 ## Testing
 
-- **Unit tests** with Node's built-in `node:test` (no dependencies):
-  - `tracker.js`: replay recorded event fixtures (3 parallel agents, one failed, one nested agent, an aborted turn, a turn with no agents) and assert progress, groups, totals and statuses.
-  - `pricing.js`: known model, unknown model, cache-token pricing, the `[1m]` context window.
-  - `roles.js`: type-first precedence, keyword matching, fallback to plain.
+- **Unit tests** run with `claude plugin test` using `claude-code/testing` (TypeScript), not `node:test`:
+  - `tracker.ts`: replay recorded event fixtures (3 parallel agents, one failed, one nested agent, an aborted turn, a turn with no agents) and assert progress, groups, totals and statuses.
+  - `pricing.ts`: known model, unknown model, cache-token pricing, per-model context windows.
+  - `roles.ts`, `tasks.ts`, `mascot.ts`, `sprite.ts`, `format.ts`, `view.ts`: precedence and fallbacks, tool-call parsing, input validation, grid and colour output, formatting, view models.
+  - UI tests mount the band and the pane on both the terminal and the desktop surface, press `×`, and call `set_mascot` and an ordinary tool through the gating hooks.
 - **Live check:** with hot reload in a real session, set off a turn with 3 parallel sub-agents. Confirm the band and panel in the Desktop Code tab and in the terminal, at both docked and narrow widths.
 
 ## Location and install
@@ -138,3 +159,8 @@ Each unit has one job. The calculating units import nothing from the UI and are 
 - A planning command that declares tasks and dependencies, enabling "planned · after N".
 - Nested agents drawn as an indented tree instead of a flat list.
 - A setting to hide $ figures.
+
+## Not in v1 / known gaps
+
+- Per-agent `known` identities are not pruned. That is fine at realistic sizes.
+- Nested agents are shown flat.
