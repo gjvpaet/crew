@@ -37,6 +37,8 @@ From the Claude Code mods docs (overview, reference, events, interface, api):
 
 Every gap between segments comes from the row's `gap`, never from spaces inside a text (Desktop drops trailing spaces).
 
+That is the terminal. On desktop, vscode and mobile the bar is one 160×18 px SVG with the pill (`Tasks 3/5`) drawn inside it (purple pill, lilac fill), and a 16 px developer Pip sits before `N running`.
+
 - **Shown when** a turn is running and either at least one sub-agent exists or a task list has been seen. A turn with neither shows no band.
 - **Label:** the first line of the user's prompt, shortened (task lists have no title in the tool data, so it is always the prompt).
 - **Count (Hybrid source):**
@@ -50,25 +52,24 @@ Every gap between segments comes from the row's `gap`, never from spaces inside 
 ### Agents panel
 
 - **Header cards:** ≈Cost · Tokens · Time for the current turn only (requests are tracked per model in `turnByModel`). A small line underneath shows session totals. When some model has no price, the header cost is a partial sum marked `+`.
-- **Groups, in order:**
+- **Groups, in order** (each header is a button, `▾ Running · 2` / `▸ Finished · 3`, that folds its group; the choice is kept per group):
   - Running
   - Waiting (`pending`, `waiting`, `idle`)
   - Finished (`completed`)
   - Failed (`failed`, `killed`, and agents stopped by an aborted turn, labelled *stopped*)
-- **Each row:**
-  - mascot and description
-  - model, plus effort only when the event data includes it (never inferred)
-  - tokens · ctx % · ≈$ · elapsed, for that agent's lifetime usage
-  - a bar that shimmers while running and fills at the end, with ✓ (finished) or ✗ (failed or stopped)
+- **Each agent is a rounded card:** Pip on the left (a crisp 32 px SVG on desktop, vscode and mobile; half-block text on the terminal), then:
+  - description, with elapsed time and ✓ (finished), ✗ (failed or stopped) or a note on the right
+  - effort coloured by level (low green, medium blue, high amber, xhigh/max red), only when the event data includes it (never inferred), then model · ctx % · tokens · ≈$ for that agent's lifetime usage
   - per-agent step progress (`3/5 · step name`) only when that agent's own task-list calls are visible
-- **A Main row** for the lead agent. Main starts from zero each turn, so it matches the header; a sub-agent that carries over from an earlier turn shows its lifetime usage, so the rows can exceed the header totals.
-- **Many agents:** with more than 8 sub-agents (Main not counted), Finished collapses to a single expandable `Finished · N` line.
+  - a bar in the agent's own colour (six fixed accents, by spawn order; Main takes the first): to scale with steps, full at the end, a shimmer while running without steps. An SVG off the terminal, the text bar on it.
+- **A Main card** for the lead agent. Main starts from zero each turn, so it matches the header; a sub-agent that carries over from an earlier turn shows its lifetime usage, so the rows can exceed the header totals. Once Main's own turn has ended while sub-agents still run, it reads `waiting on N agents` instead of ✓.
+- **Many agents:** with more than 8 sub-agents (Main not counted), Finished starts folded; every group starts open otherwise.
 - **Nested agents:** listed flat, with `↳ from <parent description>` taken from `parentId`.
 
 ### Mascots
 
 - One **original** 8×8 pixel character, "Pip", created for this mod: a round bean body with dot eyes and stubby feet. It is not based on any existing mascot or brand character, including the crabs in the inspiring mod and Anthropic's mascot.
-- Drawn as half-block cells (4 rows of 8) so the terminal and Desktop render it the same way.
+- Drawn as half-block cells (4 rows of 8) on the terminal and as one SVG rect per pixel elsewhere, both from the same pixel list (`spritePixels`).
 - Accessory by role:
 
   | Role | Accessory |
@@ -92,15 +93,16 @@ Each unit has one job. The calculating units import nothing from the UI and are 
 | `tasks.ts` | Turns task-list tool calls (`TodoWrite`, `TaskCreate`, `TaskUpdate`, `mcp__ccd_turn__update_plan`) into a task list and `{done, total, current}`. | none |
 | `pricing.ts` | Per-model price table (input, output, cacheRead, cacheWrite per MTok, plus context window) with an `asOf` date. `estimateUsd(usage, model)` returns `null` for unknown models. `contextWindow(model)` comes from the same table. | none |
 | `roles.ts` | `roleFor({type, description})` returns `developer | designer | researcher | reviewer | plain`. | none |
-| `sprite.ts` | The base 8×8 grid plus accessory overlays and colours. Returns rows of half-block cells. | none |
+| `sprite.ts` | The base 8×8 grid plus accessory overlays and colours. `spritePixels` lists the coloured pixels; `spriteCells` packs them into half-block cells. | none |
+| `svg.ts` | Pure SVG markup builders for the non-terminal surfaces: `pipSvg` (one crisp rect per pixel), `barSvg` (rounded track, fill, deterministic shimmer from `now`), `bandBarSvg` (bar plus a centred pill), `escapeXml`. Hex/rgba only: theme names do not reach inside an SVG. | `sprite.ts`, `format.ts` |
 | `mascot.ts` | The `set_mascot` tool spec, input validation and the pure function that applies a change to the saved prefs. | none |
 | `format.ts` | Display helpers: token, ≈$, duration and percent formatting, text bars, the running shimmer, truncation, model names. | none |
-| `view.ts` | Pure view models: `bandLine` and `panelView` (rows, groups, header cards) built from tracker selectors. | `tracker.ts`, `sprite.ts`, `pricing.ts`, `format.ts` |
-| `band.tsx` | Draws the `AbovePrompt` band from `view.ts`. | `tracker.ts`, `view.ts` |
-| `panel.tsx` | Draws the dock/inline Agents pane from `view.ts`. | `tracker.ts`, `view.ts`, `sprite.ts` |
+| `view.ts` | Pure view models: `bandLine` and `panelView` (rows, groups, header cards) built from tracker selectors. A row carries its accent, effort and its theme tone, model, `fraction` (null = shimmer) and Main's waiting state; `panelView` takes the `groupOpen` overrides and `toggleGroup` computes the next one. | `tracker.ts`, `sprite.ts`, `pricing.ts`, `format.ts` |
+| `band.tsx` | Draws the `AbovePrompt` band from `view.ts`: the SVG bar off the terminal, the text bar on it (`e.surface`). | `tracker.ts`, `view.ts`, `svg.ts` |
+| `panel.tsx` | Draws the dock/inline Agents pane from `view.ts` as cards, SVG Pip and bars off the terminal, half-block text on it. Group headers write `groupOpen`. | `tracker.ts`, `view.ts`, `sprite.ts`, `svg.ts` |
 | `register.tsx` | `register(on)`: subscribes to events, feeds the tracker, keeps state in `$.state`, registers the `/crew` command and the `set_mascot` tool, loads mascot overrides from `$.store` on `session.start`, opens the pane on the first spawn, and installs the band and pane renderers. Listed in `hooks/hooks.json`. | all |
 
-The `$.state` contract (state types, `PluginState`) lives in `types/index.d.ts`.
+The `$.state` contract (state types, `PluginState`) lives in `types/index.d.ts`: `model`, `isBandHidden`, `groupOpen` (per-group fold overrides, replacing `isFinishedOpen`), `mascots`, `hasAutoOpened`.
 
 ### Data flow
 
