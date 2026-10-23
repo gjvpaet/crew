@@ -27,3 +27,9 @@ test('prefs override accessory and colours', async () => {
 	expect(recoloured[2][2]).toEqual({ ch: '▀', fg: PALETTE.eye, bg: '#112233' })
 	expect(spriteCells('reviewer', { reviewer: { accent: '#00FF00' } })[1][1].fg).toBe('#00FF00')
 })
+
+test('an unknown accessory draws as none', async () => {
+	const prefs = { designer: { accessory: 'tophat' as any } }
+	expect(spriteGrid('designer', prefs)).toEqual(spriteGrid('plain', {}))
+	expect(spriteCells('designer', prefs)).toEqual(spriteCells('plain', {}))
+})

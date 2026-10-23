@@ -30,7 +30,7 @@ export type ListedAgent = { id: string; status: AgentStatusView; parentId?: stri
 
 export type CrewEvent =
 	| { kind: 'turnStart'; at: number; turnId: string; text: string; agentId?: string }
-	| { kind: 'spawn'; at: number; agentId: string; description: string; subagentType: string; model?: string }
+	| { kind: 'spawn'; at: number; agentId: string; description: string; subagentType: string; model?: string; parentId?: string }
 	| { kind: 'step'; at: number; agentId?: string; model: string; effort?: string; usage: ApiUsage | null }
 	| { kind: 'turnEnd'; at: number; agentId?: string; isAborted: boolean; reason: string }
 	| { kind: 'tasks'; agentId?: string; call: TaskToolCall }
@@ -123,7 +123,7 @@ function startTurn(state: CrewState, ev: Extract<CrewEvent, { kind: 'turnStart' 
 function spawnAgent(state: CrewState, ev: Extract<CrewEvent, { kind: 'spawn' }>): CrewState {
 	const previous = state.agents[ev.agentId]
 	const model = previous?.model ?? ev.model
-	const parentId = previous?.parentId ?? state.known[ev.agentId]?.parentId
+	const parentId = ev.parentId ?? previous?.parentId ?? state.known[ev.agentId]?.parentId
 	const agent: AgentRecord = {
 		...(previous ?? newAgent(ev.agentId, ev.at)),
 		description: ev.description || 'Agent',
@@ -209,6 +209,9 @@ function applyStatuses(state: CrewState, ev: Extract<CrewEvent, { kind: 'statuse
 		if (!agent || agent.status === 'stopped') return next
 		// A lagging list never un-ends an agent; revival belongs to startTurn(agentId) and addStep.
 		if (ENDED.has(agent.status) && !ENDED.has(item.status)) return next
+		const isParentKnown =
+			!item.parentId || (agent.parentId === item.parentId && next.known[item.id]?.parentId === item.parentId)
+		if (item.status === agent.status && isParentKnown) return next
 		const isEnding = ENDED.has(item.status) && !ENDED.has(agent.status)
 		const parentId = item.parentId ?? agent.parentId
 		const updated = withAgent(next, {
@@ -224,19 +227,22 @@ function applyStatuses(state: CrewState, ev: Extract<CrewEvent, { kind: 'statuse
 }
 
 export function reduce(state: CrewState, ev: CrewEvent): CrewState {
+	// State saved by an older build may lack keys added since; a current one passes through as itself.
+	const isCurrent = Object.keys(EMPTY_STATE).every(key => key in state)
+	const s: CrewState = isCurrent ? state : { ...EMPTY_STATE, ...state }
 	switch (ev.kind) {
 		case 'turnStart':
-			return startTurn(state, ev)
+			return startTurn(s, ev)
 		case 'spawn':
-			return spawnAgent(state, ev)
+			return spawnAgent(s, ev)
 		case 'step':
-			return addStep(state, ev)
+			return addStep(s, ev)
 		case 'turnEnd':
-			return endTurn(state, ev)
+			return endTurn(s, ev)
 		case 'tasks':
-			return applyTasks(state, ev)
+			return applyTasks(s, ev)
 		case 'statuses':
-			return applyStatuses(state, ev)
+			return applyStatuses(s, ev)
 	}
 }
 
@@ -252,6 +258,14 @@ export function selectProgress(state: CrewState): Progress | null {
 	const done = state.order.filter(id => DONE_FOR_PROGRESS.has(state.agents[id]?.status ?? 'completed')).length
 	return { source: 'agents', done, total: state.order.length, fraction: done / state.order.length }
 }
+
+// The clock only matters while something on screen counts time: an open turn or a live agent.
+export const isTicking = (state: CrewState) =>
+	(!!state.turn && state.turn.endedAt === undefined) ||
+	state.order.some(id => {
+		const agent = state.agents[id]
+		return !!agent && isLive(agent)
+	})
 
 export const selectRunning = (state: CrewState) =>
 	state.order.filter(id => state.agents[id]?.status === 'running').length

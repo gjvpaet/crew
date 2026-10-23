@@ -32,9 +32,14 @@ const OVERLAYS: Record<Accessory, Record<number, string>> = {
 
 const styleFor = (role: Role, prefs: MascotPrefs): MascotStyle => prefs[role] ?? {}
 
-export function spriteGrid(role: Role, prefs: MascotPrefs): string[] {
+// A stored or hand-edited pref may name an accessory this build has never heard of: it draws as none.
+function accessoryFor(role: Role, prefs: MascotPrefs): Accessory {
 	const accessory = styleFor(role, prefs).accessory ?? DEFAULT_ACCESSORY[role]
-	const overlay = OVERLAYS[accessory]
+	return Object.prototype.hasOwnProperty.call(OVERLAYS, accessory) ? accessory : 'none'
+}
+
+export function spriteGrid(role: Role, prefs: MascotPrefs): string[] {
+	const overlay = OVERLAYS[accessoryFor(role, prefs)] ?? {}
 	return BASE.map((row, index) => {
 		const layer = overlay[index]
 		if (!layer) return row
@@ -69,7 +74,7 @@ function cell(top: string | undefined, bottom: string | undefined): SpriteCell {
 
 export function spriteCells(role: Role, prefs: MascotPrefs): SpriteCell[][] {
 	const style = styleFor(role, prefs)
-	const accessory = style.accessory ?? DEFAULT_ACCESSORY[role]
+	const accessory = accessoryFor(role, prefs)
 	const grid = spriteGrid(role, prefs)
 	const rows: SpriteCell[][] = []
 	for (let r = 0; r < 4; r++) {

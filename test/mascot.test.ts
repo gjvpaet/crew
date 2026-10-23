@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { applyMascotChange, parseMascotInput } from '../hooks/mascot'
+import { applyMascotChange, parseMascotInput, sanitizeMascots } from '../hooks/mascot'
 
 test('a valid change parses', async () => {
 	expect(parseMascotInput({ role: 'designer', accessory: 'hardhat', body: '#112233' })).toEqual({
@@ -26,4 +26,19 @@ test('changes merge into prefs, reset removes the role', async () => {
 	const twice = applyMascotChange(once, { role: 'designer', style: { body: '#112233' } })
 	expect(twice).toEqual({ designer: { accessory: 'hardhat', body: '#112233' } })
 	expect(applyMascotChange(twice, { role: 'designer', reset: true })).toEqual({})
+})
+
+test('stored prefs keep only valid roles and fields', async () => {
+	expect(
+		sanitizeMascots({
+			explorer: { accessory: 'hardhat' },
+			designer: { accessory: 'hardhat', body: 'blue', accent: '#00FF00', extra: 1 },
+			researcher: { accessory: 'tophat' },
+			reviewer: 7,
+			plain: { body: '#112233' }
+		})
+	).toEqual({ designer: { accessory: 'hardhat', accent: '#00FF00' }, plain: { body: '#112233' } })
+	expect(sanitizeMascots(null)).toEqual({})
+	expect(sanitizeMascots('x')).toEqual({})
+	expect(sanitizeMascots([{ accessory: 'beret' }])).toEqual({})
 })

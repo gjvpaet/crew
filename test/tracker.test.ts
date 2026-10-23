@@ -4,6 +4,7 @@ import {
 	EMPTY_STATE,
 	MAIN,
 	contextFraction,
+	isTicking,
 	reduce,
 	selectGroups,
 	selectProgress,
@@ -271,4 +272,39 @@ test('a partial usage still gives a numeric context size', async () => {
 		{ kind: 'step', at: 3000, model: 'claude-opus-5-5', usage: { input_tokens: 10, output_tokens: 5 } as any }
 	])
 	expect(state.agents.main.lastRequestInput).toBe(10)
+})
+
+test('state from an older shape reduces without throwing', async () => {
+	const old = { turn: null, agents: {}, order: [], tasks: [], agentTasks: {}, sessionByModel: {} } as any
+	const started = reduce(old, { kind: 'turnStart', at: 1000, turnId: 't1', text: 'Go' })
+	const spawned = reduce(started, spawn('a1', 'Research'))
+	const stepped = reduce(spawned, { kind: 'step', at: 1100, agentId: 'a1', model: 'claude-opus-5-5', usage: usage(10, 5, 0, 0) })
+	expect(stepped.known.a1?.description).toBe('Research')
+	expect(stepped.turnByModel['claude-opus-5-5']?.input).toBe(10)
+})
+
+test('statuses that change nothing return the same state', async () => {
+	const state = run([...START, { kind: 'statuses', at: 3000, list: [{ id: 'a1', status: 'running', parentId: 'p1' }] }])
+	expect(reduce(state, { kind: 'statuses', at: 4000, list: [{ id: 'a1', status: 'running', parentId: 'p1' }] })).toBe(state)
+	expect(reduce(state, { kind: 'statuses', at: 4000, list: [{ id: 'a2', status: 'running' }, { id: 'zz', status: 'completed' }] })).toBe(state)
+	expect(reduce(state, { kind: 'statuses', at: 4000, list: [{ id: 'a2', status: 'completed' }] })).not.toBe(state)
+})
+
+test('a spawn carries its parent', async () => {
+	const state = run([...START, { ...spawn('a4', 'Nested'), parentId: 'a1' } as CrewEvent])
+	expect(state.agents.a4?.parentId).toBe('a1')
+	expect(state.known.a4?.parentId).toBe('a1')
+})
+
+test('time moves while a turn is open or an agent runs', async () => {
+	expect(isTicking(EMPTY_STATE)).toBe(false)
+	const started = run(START)
+	expect(isTicking(started)).toBe(true)
+	const ended = reduce(started, { kind: 'turnEnd', at: 5000, isAborted: false, reason: 'answer' })
+	expect(isTicking(ended)).toBe(true)
+	const allDone = ['a1', 'a2', 'a3'].reduce(
+		(state, agentId) => reduce(state, { kind: 'turnEnd', at: 6000, agentId, isAborted: false, reason: 'answer' }),
+		ended
+	)
+	expect(isTicking(allDone)).toBe(false)
 })
