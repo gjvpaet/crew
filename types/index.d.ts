@@ -64,7 +64,7 @@ declare module 'claude-code' {
 		crew: {
 			model: CrewState
 			isBandHidden: boolean
-			isFinishedOpen: boolean
+			groupOpen: Record<string, boolean>
 			mascots: MascotPrefs
 			hasAutoOpened: boolean
 		}

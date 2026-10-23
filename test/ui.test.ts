@@ -21,6 +21,11 @@ const PANE = {
 	}
 } as const
 
+// The kit's `find` matches an Svg's shown text, which is empty: its `alt` is read off the props instead.
+async function svgs(ui: any, alt: RegExp): Promise<any[]> {
+	return (await ui.findAll({ type: 'Svg' })).filter((svg: any) => alt.test(String(svg.props.alt)))
+}
+
 async function startTwoAgents($: any, on: any) {
 	mock.clock(on, { now: 1000 })
 	mock.store(on)
@@ -30,6 +35,7 @@ async function startTwoAgents($: any, on: any) {
 	on('ui.toast', () => ({ value: undefined }))
 	on('session.start', (_: unknown, e: any) => ({ cwd: e.cwd }))
 	on('turn.start', (_: unknown, e: any) => ({ turnId: e.turnId }))
+	on('turn.complete', () => ({ text: '' }))
 	on('agent.spawn', (_: unknown, e: any) => ({
 		model: 'claude-opus-5-5',
 		agentId: e.description === 'Research competitor launches' ? 'a1' : 'a2'
@@ -67,11 +73,63 @@ test('the pane lists each agent under Running', async ($, on) => {
 	await startTwoAgents($, on)
 	for (const surface of ['terminal', 'desktop'] as const) {
 		const ui = await $.ui.mount({ ...PANE, surface })
-		expect(await ui.find({ type: 'Text', text: /Running · 2/ })).toBeDefined()
+		expect((await ui.find({ key: 'group-Running' }))?.text).toBe('▾ Running · 2')
 		expect(await ui.find({ type: 'Text', text: /Research competitor launches/ })).toBeDefined()
 		expect(await ui.find({ type: 'Text', text: /Opus 5\.5/ })).toBeDefined()
 		await ui.unmount()
 	}
+})
+
+test('on desktop every agent card draws Pip and its bar as SVG', async ($, on) => {
+	await startTwoAgents($, on)
+	const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	// Main and the two sub-agents.
+	const pips = await svgs(ui, /mascot/)
+	expect(pips).toHaveLength(3)
+	expect(pips.every(pip => String(pip.props.source).includes('shape-rendering="crispEdges"'))).toBe(true)
+	expect(pips.every(pip => pip.props.width === 32 && pip.props.height === 32)).toBe(true)
+	const bars = await svgs(ui, /progress/)
+	expect(bars).toHaveLength(3)
+	// Running with no steps: a shimmer in the agent's own accent.
+	const [research] = await svgs(ui, /^Research competitor launches progress/)
+	expect(String(research?.props.source)).toContain('class="shimmer"')
+	expect(String(research?.props.source)).toContain('#1D9E75')
+	const [landing] = await svgs(ui, /^Build the landing page progress/)
+	expect(String(landing?.props.source)).toContain('#7F77DD')
+	expect(await ui.find({ type: 'Text', text: /▀|▄/ })).toBeUndefined()
+	await ui.unmount()
+})
+
+test('on the terminal the cards draw the half-block Pip and a text bar', async ($, on) => {
+	await startTwoAgents($, on)
+	const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+	expect(await ui.findAll({ type: 'Svg' })).toHaveLength(0)
+	expect(await ui.find({ type: 'Text', text: /▀|▄/ })).toBeDefined()
+	const bar = await ui.find({ type: 'Text', text: /^[█░▓]{8,}$/ })
+	expect(bar).toBeDefined()
+	expect(['#1D9E75', '#7F77DD']).toContain(bar?.props.color)
+	await ui.unmount()
+})
+
+test('Main shows it is waiting while a sub-agent still runs', async ($, on) => {
+	await startTwoAgents($, on)
+	await $.turn.complete({ turnId: 't1', answer: 'x', durationMs: 1, isAborted: false, reason: 'answer' } as any)
+	const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	expect((await ui.find({ type: 'Text', text: /waiting on/ }))?.text).toBe('waiting on 2 agents')
+	await ui.unmount()
+})
+
+test('a group header collapses and reopens its group', async ($, on) => {
+	await startTwoAgents($, on)
+	const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	expect(await ui.find({ type: 'Text', text: /Research competitor launches/ })).toBeDefined()
+	await ui.press({ key: 'group-Running' })
+	expect((await ui.find({ key: 'group-Running' }))?.text).toBe('▸ Running · 2')
+	expect(await ui.find({ type: 'Text', text: /Research competitor launches/ })).toBeUndefined()
+	await ui.press({ key: 'group-Running' })
+	expect((await ui.find({ key: 'group-Running' }))?.text).toBe('▾ Running · 2')
+	expect(await ui.find({ type: 'Text', text: /Research competitor launches/ })).toBeDefined()
+	await ui.unmount()
 })
 
 test('set_mascot saves the change', async ($, on) => {
@@ -160,7 +218,7 @@ test('an agent run lands on the pane and the band through the engine', async ($,
 	await $.turn.complete({ turnId: 's1', agentId: 'a1', answer: 'x', durationMs: 1, isAborted: false, reason: 'answer' } as any)
 	for (const surface of ['terminal', 'desktop'] as const) {
 		const pane = await $.ui.mount({ ...PANE, surface })
-		expect(await pane.find({ type: 'Text', text: /Finished · 1/ })).toBeDefined()
+		expect((await pane.find({ key: 'group-Finished' }))?.text).toBe('▾ Finished · 1')
 		expect((await pane.find({ type: 'Text', text: /1\.5k/ }))?.text).toContain('1.5k')
 		await pane.unmount()
 		const band = await $.ui.mount({ ...BAND, surface })
