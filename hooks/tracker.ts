@@ -147,12 +147,14 @@ function revive(agent: AgentRecord): AgentRecord {
 
 function addStep(state: CrewState, ev: Extract<CrewEvent, { kind: 'step' }>): CrewState {
 	const id = ev.agentId ?? MAIN
-	const previous = revive(state.agents[id] ?? newAgent(id, ev.at, state.known[id] ?? {}))
+	const existing = state.agents[id] ?? newAgent(id, ev.at, state.known[id] ?? {})
 	const order = withOrder(state, id)
-	const effort = ev.effort ?? previous.effort
+	const effort = ev.effort ?? existing.effort
 	if (!ev.usage) {
-		return { ...withAgent(state, { ...previous, model: ev.model, ...(effort ? { effort } : {}) }), order }
+		return { ...withAgent(state, { ...existing, model: ev.model, ...(effort ? { effort } : {}) }), order }
 	}
+	// Only a step that carries usage proves the agent is alive again.
+	const previous = revive(existing)
 	const model = ev.usage.model || ev.model
 	const agent: AgentRecord = {
 		...previous,
@@ -160,7 +162,9 @@ function addStep(state: CrewState, ev: Extract<CrewEvent, { kind: 'step' }>): Cr
 		...(effort ? { effort } : {}),
 		usage: addUsage(previous.usage, ev.usage),
 		lastRequestInput:
-			ev.usage.input_tokens + ev.usage.cache_read_input_tokens + ev.usage.cache_creation_input_tokens
+			(ev.usage.input_tokens ?? 0) +
+			(ev.usage.cache_read_input_tokens ?? 0) +
+			(ev.usage.cache_creation_input_tokens ?? 0)
 	}
 	return {
 		...withAgent(state, agent),

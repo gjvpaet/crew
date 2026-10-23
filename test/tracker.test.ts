@@ -255,3 +255,20 @@ test('the main context size carries across prompts', async () => {
 	])
 	expect(state.agents[MAIN].lastRequestInput).toBe(10_000)
 })
+
+test('a step without usage does not revive a stopped agent', async () => {
+	const state = run([
+		...START,
+		{ kind: 'turnEnd', at: 4000, isAborted: true, reason: 'aborted' },
+		{ kind: 'step', at: 5000, agentId: 'a1', model: 'claude-opus-5-5', usage: null }
+	])
+	expect(state.agents.a1.status).toBe('stopped')
+})
+
+test('a partial usage still gives a numeric context size', async () => {
+	const state = run([
+		...START,
+		{ kind: 'step', at: 3000, model: 'claude-opus-5-5', usage: { input_tokens: 10, output_tokens: 5 } as any }
+	])
+	expect(state.agents.main.lastRequestInput).toBe(10)
+})

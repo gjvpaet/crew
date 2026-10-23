@@ -61,7 +61,7 @@ export const register: Register = on => {
 			}
 		}
 		return started
-	})
+	}).catch(($, e, next) => next(e)) // a Crew failure never fails a spawn
 
 	on('turn.step', async function* ($, e, next) {
 		const result = yield* next(e)
@@ -108,7 +108,7 @@ export const register: Register = on => {
 			await apply($, { kind: 'tasks', agentId: e.agentId, call: { tool, input: toolInput(e), result: ran.result } })
 		}
 		return ran
-	})
+	}).catch(($, e, next) => next(e)) // a Crew failure never fails a tool call
 
 	registerBand(on)
 	registerPanel(on)

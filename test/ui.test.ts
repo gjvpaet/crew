@@ -77,3 +77,11 @@ test('set_mascot saves the change', async ($, on) => {
 	const refused = await $.tool.call({ tool: 'mcp__crew__set_mascot', role: 'pilot' } as any)
 	expect(refused.deny).toBe('role must be one of developer, designer, researcher, reviewer, plain')
 })
+
+test('the gating hooks hand an ordinary tool call on', async ($, on) => {
+	mock.clock(on, { now: 1000 })
+	mock.store(on)
+	on('tool.call', () => ({ result: {} }))
+	const ran = await $.tool.call({ tool: 'Bash', command: 'ls' } as any)
+	expect(ran.deny).toBeUndefined()
+})
