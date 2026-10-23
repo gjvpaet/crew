@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import { PALETTE, spriteCells, spriteGrid, spritePixels } from '../hooks/sprite'
-import { bandBarSvg, barSvg, escapeXml, pipSvg } from '../hooks/svg'
+import { bandBarSvg, barSvg, escapeXml, padTop, pipSvg } from '../hooks/svg'
 
 const rects = (svg: string) => svg.match(/<rect\b[^>]*>/g) ?? []
 const part = (svg: string, name: string) => rects(svg).find(rect => rect.includes(`class="${name}"`))
@@ -137,4 +137,14 @@ test('pipSvg gives the same drawing again and follows a prefs change', async () 
 	expect(pipSvg('designer', { designer: { accessory: 'hardhat' } }, 32)).toBe(hardhat)
 	expect(pipSvg('designer', {}, 16)).not.toBe(first)
 	expect(pipSvg('designer', {}, 32)).toBe(first)
+})
+
+test('padTop adds clear space above a drawing and keeps the drawing whole', async () => {
+	const inner = barSvg({ fraction: 0.5, width: 200, height: 18, color: '#7F77DD' })
+	const padded = padTop(inner, 200, 18, 6)
+	expect(isWellFormed(padded)).toBe(true)
+	expect(padded.startsWith('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 24" width="200" height="24">')).toBe(true)
+	// The drawing is nested unchanged but for its place, 6px down.
+	expect(padded).toContain(inner.replace('<svg ', '<svg y="6" '))
+	expect(padTop(inner, 200, 18, 0)).toBe(inner)
 })

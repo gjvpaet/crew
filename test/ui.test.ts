@@ -77,7 +77,9 @@ test('on desktop the band draws its bar, pill and a mini Pip as SVG', async ($, 
 	const [bar] = await svgs(ui, /Agents 0\/2/)
 	expect(bar).toBeDefined()
 	expect(String(bar?.props.source)).toContain('>Agents 0/2</text>')
-	expect(bar?.props.height).toBe(18)
+	// Desktop rests an Svg on the text baseline; clear space above it brings its middle level with the text's.
+	expect(bar?.props.height).toBe(24)
+	expect(String(bar?.props.source)).toContain('<svg y="6" ')
 	expect(bar?.props.width).toBe(200)
 	// A fill dark enough to read against the track in light mode, not lilac.
 	expect(String(bar?.props.source)).toContain('fill="#7F77DD"')
@@ -85,6 +87,8 @@ test('on desktop the band draws its bar, pill and a mini Pip as SVG', async ($, 
 	const [pip] = await svgs(ui, /mascot/)
 	expect(String(pip?.props.source)).toContain('shape-rendering="crispEdges"')
 	expect(pip?.props.width).toBe(16)
+	expect(pip?.props.height).toBe(20)
+	expect(String(pip?.props.source)).toContain('<svg y="4" ')
 	expect((await ui.find({ type: 'Text', text: /running/ }))?.text).toBe('2 running')
 	// The pill lives in the SVG on desktop, never as a second text.
 	expect(await ui.find({ type: 'Text', text: /Agents 0\/2/ })).toBeUndefined()

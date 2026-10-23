@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { On } from 'claude-code'
 
 import type { MascotPrefs } from '../types'
-import { bandBarSvg, pipSvg } from './svg'
+import { bandBarSvg, padTop, pipSvg } from './svg'
 import { EMPTY_STATE, selectProgress } from './tracker'
 import { bandLine } from './view'
 
@@ -16,6 +16,11 @@ const DOT = { running: 'claude', done: 'success', aborted: 'error' } as const
 // The SVG bar's look on desktop, vscode and mobile: a violet fill (readable on the light track) and a purple pill.
 const BAR = { width: 200, height: 18, fill: '#7F77DD', pillBg: '#534AB7', pillFg: '#EEEDFE' }
 const MINI_PIP_PX = 16
+// Desktop rests an Svg on the text baseline and leaves the line's descent under it, so `alignItems="center"`
+// centres drawing plus gap and the drawing rides high. Clear space above it, as measured on desktop, levels
+// its middle with the text's: 6px for the bar, 4px for Pip, whose two empty top rows already sit it lower.
+const BAR_LIFT = 6
+const PIP_LIFT = 4
 
 // `onViewport` hears whether the surface docks a pane beside the transcript, each time the band is drawn where it said.
 export function registerBand(on: On, onViewport: (isFullscreen: boolean) => void) {
@@ -41,26 +46,31 @@ export function registerBand(on: On, onViewport: (isFullscreen: boolean) => void
 						{line.label}
 					</Text>
 					<Svg
-						source={bandBarSvg({
-							fraction: progress.fraction,
-							width: BAR.width,
-							height: BAR.height,
-							color: BAR.fill,
-							pill: line.pill,
-							pillBg: BAR.pillBg,
-							pillFg: BAR.pillFg
-						})}
+						source={padTop(
+							bandBarSvg({
+								fraction: progress.fraction,
+								width: BAR.width,
+								height: BAR.height,
+								color: BAR.fill,
+								pill: line.pill,
+								pillBg: BAR.pillBg,
+								pillFg: BAR.pillFg
+							}),
+							BAR.width,
+							BAR.height,
+							BAR_LIFT
+						)}
 						alt={`${line.pill}, ${line.percent}`}
 						width={BAR.width}
-						height={BAR.height}
+						height={BAR.height + BAR_LIFT}
 					/>
 					<Text tabular>{line.percent}</Text>
 					{line.runningLabel && (
 						<Svg
-							source={pipSvg('developer', prefs, MINI_PIP_PX)}
+							source={padTop(pipSvg('developer', prefs, MINI_PIP_PX), MINI_PIP_PX, MINI_PIP_PX, PIP_LIFT)}
 							alt="developer mascot"
 							width={MINI_PIP_PX}
-							height={MINI_PIP_PX}
+							height={MINI_PIP_PX + PIP_LIFT}
 						/>
 					)}
 					{line.runningLabel && (
