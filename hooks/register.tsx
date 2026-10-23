@@ -26,6 +26,15 @@ const STEPS_NOTE =
 	'\n\n(Progress for the Crew panel: before you start, write your plan as a task list of 3 to 7 short steps with ' +
 	'your task-list tool (TodoWrite, or TaskCreate and TaskUpdate), then mark each step in progress and completed as you go.)'
 
+// A tool Claude can call to bring up the Agents pane, as /crew does for a person: a skill opens it as work begins.
+const OPEN_PANEL_TOOL = 'mcp__crew__open_panel'
+const OPEN_PANEL_SPEC = {
+	name: 'open_panel',
+	description:
+		'Open the Crew Agents panel, which shows the plan, each sub-agent with its progress, tokens and cost. Call it when starting multi-step or sub-agent work so the user can follow along.',
+	inputSchema: { type: 'object', properties: {}, additionalProperties: false }
+}
+
 // Origins where a person typed the prompt; every other origin (agents, notifications, triggers) continues a turn.
 const PERSON_ORIGINS = new Set(['composer', 'bridge', 'sdk'])
 
@@ -89,6 +98,7 @@ export const register: Register = on => {
 	on('session.start', async ($, e, next) => {
 		await $.command.register({ name: 'crew', description: 'Open the Crew agents panel' })
 		await $.tool.register(SET_MASCOT_SPEC)
+		await $.tool.register(OPEN_PANEL_SPEC)
 		await loadMascots($)
 		ticker?.cancel()
 		let beat = 0
@@ -180,6 +190,11 @@ export const register: Register = on => {
 
 	on('tool.call', async ($, e, next) => {
 		const tool = String(e.tool)
+		if (tool === OPEN_PANEL_TOOL) {
+			const { isPlaced } = await $.ui.open({ id: PANE, title: 'Agents' })
+			if (!isPlaced) $.ui.toast('Crew: /crew opens the Agents panel')
+			return { result: { ok: true, isPlaced } }
+		}
 		if (tool === SET_MASCOT_TOOL) {
 			const parsed = parseMascotInput(toolInput(e))
 			if ('error' in parsed) return { deny: parsed.error }

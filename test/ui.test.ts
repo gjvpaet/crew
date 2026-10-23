@@ -619,3 +619,36 @@ test('the pane lists the planned steps under Planned, folding like the other gro
 	expect(await terminal.find({ type: 'Text', text: /3\. Write the plan/ })).toBeDefined()
 	await terminal.unmount()
 })
+
+test('Claude can open the Agents panel with the open_panel tool', async ($, on) => {
+	const registered: string[] = []
+	const opened: string[] = []
+	const toasts: string[] = []
+	let isPlaced = true
+	mock.clock(on, { now: 1000 })
+	mock.store(on)
+	on('command.register', () => ({ value: { command: 'crew' } }))
+	on('tool.register', (_: unknown, e: any) => {
+		registered.push(e.name)
+		return { value: { tool: `mcp__crew__${e.name}` } }
+	})
+	on('ui.open', (_: unknown, e: any) => {
+		opened.push(e.id)
+		return { value: { isPlaced } }
+	})
+	on('ui.toast', (_: unknown, e: any) => {
+		toasts.push(String(e.text ?? e))
+		return { value: undefined }
+	})
+	on('session.start', (_: unknown, e: any) => ({ cwd: e.cwd }))
+	await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+	expect(registered).toContain('open_panel')
+	const ran = await $.tool.call({ tool: 'mcp__crew__open_panel' } as any)
+	expect(opened).toEqual(['crew'])
+	expect(ran.result).toEqual({ ok: true, isPlaced: true })
+	// Where no surface can seat the pane, it says how to open it instead.
+	isPlaced = false
+	const unplaced = await $.tool.call({ tool: 'mcp__crew__open_panel' } as any)
+	expect(unplaced.result).toEqual({ ok: true, isPlaced: false })
+	expect(toasts.some(text => text.includes('/crew'))).toBe(true)
+})

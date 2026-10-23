@@ -98,6 +98,7 @@ That is the terminal. On desktop, vscode and mobile the bar is one 200×18 px SV
   | Plain | None |
 
 - The role comes from the agent's `type` first, then keywords in its `description` (see `roles.ts`).
+- **Opening the pane from Claude:** a second model-callable tool, `mcp__crew__open_panel` (no inputs), opens the Agents pane as `/crew` does and answers `{ ok, isPlaced }`; where no surface seats it, Crew toasts that `/crew` opens it. A skill calls it as multi-step work begins.
 - **Restyling:** the user asks Claude, which calls the model-callable tool `mcp__crew__set_mascot` (inputs: `role`, `accessory`, `body` and `accent` as `#RRGGBB`, or `reset`). The mod answers the call itself (it never reaches a real tool) and persists the role's overrides in the `$.store` key `mascots`. They are loaded on `session.start` and apply across sessions. Bad input is refused with a message that names the valid values.
 
 ## Architecture
