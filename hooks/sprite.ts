@@ -65,6 +65,22 @@ function colourOf(ch: string, accessory: Accessory, style: MascotStyle): string 
 	}
 }
 
+export type SpritePixel = { x: number; y: number; fill: string }
+
+// Every coloured pixel of the 8×8 sprite: the one source both the half-block cells and the SVG draw from.
+export function spritePixels(role: Role, prefs: MascotPrefs): SpritePixel[] {
+	const style = styleFor(role, prefs)
+	const accessory = accessoryFor(role, prefs)
+	const pixels: SpritePixel[] = []
+	spriteGrid(role, prefs).forEach((row, y) => {
+		;[...row].forEach((ch, x) => {
+			const fill = colourOf(ch, accessory, style)
+			if (fill) pixels.push({ x, y, fill })
+		})
+	})
+	return pixels
+}
+
 function cell(top: string | undefined, bottom: string | undefined): SpriteCell {
 	if (top && bottom) return { ch: '▀', fg: top, bg: bottom }
 	if (top) return { ch: '▀', fg: top }
@@ -73,14 +89,13 @@ function cell(top: string | undefined, bottom: string | undefined): SpriteCell {
 }
 
 export function spriteCells(role: Role, prefs: MascotPrefs): SpriteCell[][] {
-	const style = styleFor(role, prefs)
-	const accessory = accessoryFor(role, prefs)
-	const grid = spriteGrid(role, prefs)
+	const colours: Array<Array<string | undefined>> = Array.from({ length: 8 }, () => Array(8).fill(undefined))
+	for (const { x, y, fill } of spritePixels(role, prefs)) colours[y][x] = fill
 	const rows: SpriteCell[][] = []
 	for (let r = 0; r < 4; r++) {
-		const top = grid[r * 2]
-		const bottom = grid[r * 2 + 1]
-		rows.push([...top].map((_, col) => cell(colourOf(top[col], accessory, style), colourOf(bottom[col], accessory, style))))
+		const top = colours[r * 2]
+		const bottom = colours[r * 2 + 1]
+		rows.push(top.map((fill, col) => cell(fill, bottom[col])))
 	}
 	return rows
 }
