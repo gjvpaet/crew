@@ -53,3 +53,11 @@ test('the Desktop plan tool sets items, advances, and marks by number', async ()
 test('other tools are not task calls', async () => {
 	expect(applyTaskCall([], { tool: 'Bash', input: { command: 'ls' } })).toBeNull()
 })
+
+test('wrap_up ticks off the whole plan, as the app does', async () => {
+	const plan = applyTaskCall([], { tool: PLAN, input: planItems }) ?? []
+	const wrapped = applyTaskCall(plan, { tool: 'mcp__ccd_turn__wrap_up', input: { recap: 'Done.' } })
+	expect(wrapped?.map(item => item.status)).toEqual(['completed', 'completed', 'completed'])
+	expect(wrapped?.map(item => item.title)).toEqual(['A', 'B', 'C'])
+	expect(applyTaskCall([], { tool: 'mcp__ccd_turn__wrap_up', input: {} })).toEqual([])
+})

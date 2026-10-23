@@ -40,7 +40,7 @@ Desktop lines the band up on the text baseline, where an image rests its bottom 
 
 That is the terminal. On desktop, vscode and mobile the bar is one 200×18 px SVG with the pill (`Tasks 3/5`) drawn inside it (purple pill, violet `#7F77DD` fill). The pill sits at the end away from the fill's edge (right while under half done, left from half on), so it never hides the progress, and a 16 px developer Pip sits before `N running`.
 
-- **Shown when** a turn is running and either at least one sub-agent exists or a task list has been seen. A turn with neither shows no band.
+- **Shown when** a turn is running and either at least one sub-agent exists or this prompt has a task list. A turn with neither shows no band. A list left unfinished by an earlier prompt is kept (so this prompt's updates can build on it) but not shown until this prompt touches it; a finished one is dropped. `mcp__ccd_turn__wrap_up` ticks off every step, as the app does, so a plan closed early reads as done rather than stuck at 0/N.
 - **Label:** the first line of the prompt the person typed, shortened (task lists have no title in the tool data, so it is always the prompt). A turn started by an agent message, a task notification, another session or a trigger keeps the person's label; a raw `<…>` envelope is never shown, and a turn with no person prompt reads `Working`.
 - **Count (Hybrid source):**
   - When task-list tool calls are visible: `Tasks done/total`.
@@ -102,7 +102,7 @@ Each unit has one job. The calculating units import nothing from the UI and are 
 | Unit | Responsibility | Depends on |
 |---|---|---|
 | `tracker.ts` | A pure reducer: `(state, event) → state`. Holds the current turn, the main task list, per-agent task lists, an `agents` map keyed by agent id (`description, type, role, model, effort?, status, parentId, spawnedAt, endedAt, usage {input, output, cacheRead, cacheWrite}, lastRequestInput, steps?, colorIndex?`), per-model usage for the session and for the turn (`sessionByModel`, `turnByModel`) `known`, the identity of every agent seen (colour index included, also for an agent first seen through a step or its own turn rather than a spawn), and `nextColor`, the index the next new sub-agent takes (for state saved before it existed, seeded past every stored index and the order's length). Also exports derived selectors for progress, totals and groups. | `roles.ts`, `pricing.ts`, `tasks.ts` |
-| `tasks.ts` | Turns task-list tool calls (`TodoWrite`, `TaskCreate`, `TaskUpdate`, `mcp__ccd_turn__update_plan`) into a task list and `{done, total, current}`. | none |
+| `tasks.ts` | Turns task-list tool calls (`TodoWrite`, `TaskCreate`, `TaskUpdate`, `mcp__ccd_turn__update_plan`, and `mcp__ccd_turn__wrap_up`, which completes them all) into a task list and `{done, total, current}`. | none |
 | `pricing.ts` | Per-model price table (input, output, cacheRead, cacheWrite per MTok, plus context window) with an `asOf` date. `estimateUsd(usage, model)` returns `null` for unknown models. `contextWindow(model)` comes from the same table. | none |
 | `roles.ts` | `roleFor({type, description})` returns `developer | designer | researcher | reviewer | plain`. | none |
 | `sprite.ts` | The base 8×8 grid plus accessory overlays and colours. `spritePixels` lists the coloured pixels; `spriteCells` packs them into half-block cells. | none |

@@ -151,6 +151,8 @@ function startTurn(state: CrewState, ev: Extract<CrewEvent, { kind: 'turnStart' 
 		agents: { ...carried, [MAIN]: main },
 		order: state.order.filter(id => id in carried),
 		tasks: isListDone ? [] : state.tasks,
+		// An unfinished list is kept for this prompt's updates to build on, but shown only once one arrives.
+		areTasksCarried: !isListDone,
 		agentTasks: Object.fromEntries(Object.entries(state.agentTasks).filter(([id]) => id in carried)),
 		turnByModel: {}
 	}
@@ -238,7 +240,7 @@ function endTurn(state: CrewState, ev: Extract<CrewEvent, { kind: 'turnEnd' }>):
 function applyTasks(state: CrewState, ev: Extract<CrewEvent, { kind: 'tasks' }>): CrewState {
 	if (!ev.agentId) {
 		const list = applyTaskCall(state.tasks, ev.call)
-		return list ? { ...state, tasks: list } : state
+		return list ? { ...state, tasks: list, areTasksCarried: false } : state
 	}
 	const list = applyTaskCall(state.agentTasks[ev.agentId] ?? [], ev.call)
 	if (!list) return state
@@ -296,7 +298,7 @@ export type Progress = { source: 'tasks' | 'agents'; done: number; total: number
 
 export function selectProgress(state: CrewState): Progress | null {
 	if (!state.turn) return null
-	if (state.tasks.length > 0) {
+	if (state.tasks.length > 0 && !state.areTasksCarried) {
 		const { done, total } = taskProgress(state.tasks)
 		return { source: 'tasks', done, total, fraction: total ? done / total : 0 }
 	}

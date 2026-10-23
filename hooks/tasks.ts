@@ -4,7 +4,10 @@ export type TaskToolCall = { tool: string; input: Record<string, unknown>; resul
 
 export const PLAN_TOOL = 'mcp__ccd_turn__update_plan'
 
-export const TASK_TOOLS = new Set(['TodoWrite', 'TaskCreate', 'TaskUpdate', PLAN_TOOL])
+// The Desktop turn's closing call: the app checks off every step of the plan as it draws the wrap-up.
+export const WRAP_UP_TOOL = 'mcp__ccd_turn__wrap_up'
+
+export const TASK_TOOLS = new Set(['TodoWrite', 'TaskCreate', 'TaskUpdate', PLAN_TOOL, WRAP_UP_TOOL])
 
 type Status = TaskItem['status']
 
@@ -80,6 +83,8 @@ export function applyTaskCall(list: readonly TaskItem[], call: TaskToolCall): Ta
 			return fromTaskUpdate(list, call.input)
 		case PLAN_TOOL:
 			return fromPlan(list, call.input)
+		case WRAP_UP_TOOL:
+			return list.map(item => ({ ...item, status: 'completed' as const }))
 		default:
 			return null
 	}

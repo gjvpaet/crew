@@ -361,3 +361,35 @@ test('an envelope turn of unknown origin continues the current turn', async () =
 	expect(next.turn?.id).toBe('t1')
 	expect(next.turn?.label).toBe('Build the launch kit')
 })
+
+const plan = (statuses: string[]): CrewEvent => ({
+	kind: 'tasks',
+	call: { tool: 'mcp__ccd_turn__update_plan', input: { items: statuses.map((status, i) => ({ content: `Step ${i + 1}`, status })) } }
+})
+const prompt = (turnId: string, text: string): CrewEvent => ({ kind: 'turnStart', at: 50_000, turnId, text, isPerson: true })
+const SOLO: CrewEvent[] = [{ kind: 'turnStart', at: 1000, turnId: 't1', text: 'Fix the lane gutter', isPerson: true }]
+
+test('a plan closed by wrap_up reads as done, then leaves with the next prompt', async () => {
+	const wrapped = run([
+		...SOLO,
+		plan(['in_progress', 'pending', 'pending', 'pending']),
+		{ kind: 'tasks', call: { tool: 'mcp__ccd_turn__wrap_up', input: { recap: 'Nothing to fix.' } } }
+	])
+	expect(selectProgress(wrapped)).toEqual({ source: 'tasks', done: 4, total: 4, fraction: 1 })
+	expect(selectProgress(reduce(wrapped, prompt('t2', 'Stop the servers')))).toBeNull()
+})
+
+test('a list left unfinished by an earlier prompt is not shown until this prompt touches it', async () => {
+	const left = run([...SOLO, plan(['in_progress', 'pending', 'pending', 'pending'])])
+	const next = reduce(left, prompt('t2', 'Stop the servers'))
+	// No task call and no sub-agent this prompt: nothing to show, so the band stays away.
+	expect(selectProgress(next)).toBeNull()
+	// With a sub-agent the band counts agents, not the stale list.
+	expect(selectProgress(reduce(next, spawn('a1', 'Check the ports')))?.source).toBe('agents')
+	// Picked up again this prompt, the kept list shows with its progress.
+	const resumed = reduce(next, { kind: 'tasks', call: { tool: 'mcp__ccd_turn__update_plan', input: { advance: true } } })
+	expect(selectProgress(resumed)).toEqual({ source: 'tasks', done: 1, total: 4, fraction: 0.25 })
+	// A continuation of the same prompt (an agent message) keeps showing the list it already had.
+	const continued = reduce(resumed, { kind: 'turnStart', at: 60_000, turnId: 't3', text: '<agent-message>', isPerson: false })
+	expect(selectProgress(continued)?.source).toBe('tasks')
+})

@@ -62,6 +62,8 @@ export type CrewState = {
 	agents: Record<string, AgentRecord>
 	order: string[]
 	tasks: TaskItem[]
+	// The list is an unfinished one from an earlier prompt that this prompt has not touched: kept, not shown.
+	areTasksCarried?: boolean
 	agentTasks: Record<string, TaskItem[]>
 	sessionByModel: Record<string, Usage>
 	turnByModel: Record<string, Usage>
