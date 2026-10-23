@@ -61,3 +61,13 @@ test('wrap_up ticks off the whole plan, as the app does', async () => {
 	expect(wrapped?.map(item => item.title)).toEqual(['A', 'B', 'C'])
 	expect(applyTaskCall([], { tool: 'mcp__ccd_turn__wrap_up', input: {} })).toEqual([])
 })
+
+test('a finished list keeps its last step as the title; between steps there is none', async () => {
+	const step = (title: string, status: 'pending' | 'in_progress' | 'completed') => ({ id: title, title, status })
+	expect(taskProgress([step('One', 'completed'), step('Two', 'completed')])).toEqual({
+		done: 2,
+		total: 2,
+		current: 'Two'
+	})
+	expect(taskProgress([step('One', 'completed'), step('Two', 'pending')])).toEqual({ done: 1, total: 2 })
+})

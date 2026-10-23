@@ -91,9 +91,12 @@ export function applyTaskCall(list: readonly TaskItem[], call: TaskToolCall): Ta
 }
 
 export function taskProgress(list: readonly TaskItem[]): Steps {
-	const current = list.find(item => item.status === 'in_progress')
+	const done = list.filter(item => item.status === 'completed').length
+	// Once every step is done none is in progress, so the last one stands as the title instead of a bare count.
+	const isFinished = done > 0 && done === list.length
+	const current = list.find(item => item.status === 'in_progress') ?? (isFinished ? list[list.length - 1] : undefined)
 	return {
-		done: list.filter(item => item.status === 'completed').length,
+		done,
 		total: list.length,
 		...(current ? { current: current.title } : {})
 	}
