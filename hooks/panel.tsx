@@ -13,6 +13,7 @@ export const PANE = 'crew'
 const model = atom({ plugin: 'crew', key: 'model' } as const, EMPTY_STATE)
 const groupOpen = atom({ plugin: 'crew', key: 'groupOpen' } as const, {} as Record<string, boolean>)
 const mascots = atom({ plugin: 'crew', key: 'mascots' } as const, {} as MascotPrefs)
+const isPaneShown = atom({ plugin: 'crew', key: 'isPaneShown' } as const, false)
 
 const TONE: Record<Tone, string> = { running: 'claude', waiting: 'inactive', done: 'success', failed: 'error' }
 
@@ -41,7 +42,27 @@ const cellProps = (cell: SpriteCell) => ({
 const barAlt = (row: RowView) =>
 	`${row.title} progress ${row.fraction === null ? 'working' : `${Math.round(row.fraction * 100)}%`}`
 
+// Opens the Agents pane and notes whether a surface draws it, so the band can offer it back once it is closed.
+export async function openPane($: EngineInterface) {
+	const opened = await $.ui.open({ id: PANE, title: 'Agents' })
+	await update($, isPaneShown, () => opened.isPlaced)
+	return opened
+}
+
+// A reload can find the pane still up: the engine keeps its panes while the module starts over.
+export async function syncPaneShown($: EngineInterface) {
+	const panes = await $.ui.panes().catch(() => [])
+	await update($, isPaneShown, () => panes.some(pane => pane.id === PANE && pane.isPlaced))
+}
+
 export function registerPanel(on: On) {
+	on('ui.close', async ($, e, next) => {
+		const closed = await next(e)
+		// Gone with an unload, nothing is left to note it on.
+		if (e.id === PANE && e.origin.kind !== 'unload') await update($, isPaneShown, () => false)
+		return closed
+	})
+
 	on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
 		const elements = $.ui.resolve(e)
 		const { Box, Button, Text } = elements

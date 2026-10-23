@@ -677,3 +677,43 @@ test('a card keeps its time and mark in a column of their own, and its bar fills
 	expect(JSON.stringify(text)).toContain('Research competitor launches progress')
 	await ui.unmount()
 })
+
+test('a closed Agents pane can be brought back from the band', async ($, on) => {
+	const opened: string[] = []
+	let panes: { id: string; isPlaced: boolean }[] = []
+	mock.clock(on, { now: 1000 })
+	mock.store(on)
+	on('command.register', () => ({ value: { command: 'crew' } }))
+	on('tool.register', () => ({ value: { tool: 'mcp__crew__set_mascot' } }))
+	on('ui.open', (_: unknown, e: any) => {
+		opened.push(e.id)
+		panes = [{ id: e.id, isPlaced: true }]
+		return { value: { isPlaced: true } }
+	})
+	on('ui.panes', () => ({ value: panes.map(pane => ({ ...pane, title: 'Agents', isShown: true, isFocused: false })) }))
+	on('ui.toast', () => ({ value: undefined }))
+	on('session.start', (_: unknown, e: any) => ({ cwd: e.cwd }))
+	on('turn.start', (_: unknown, e: any) => ({ turnId: e.turnId }))
+	on('agent.spawn', () => ({ model: 'claude-opus-5-5', agentId: 'a1' }))
+	await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+	await $.turn.start({ text: 'Build the launch kit', turnId: 't1' })
+	await $.agent.spawn({ prompt: 'go', description: 'Build the landing page', subagentType: 'general-purpose' })
+
+	for (const surface of ['terminal', 'desktop'] as const) {
+		const band = await $.ui.mount({ ...BAND, surface })
+		expect((await band.find({ key: 'agents' }))?.text).toBe('Agents')
+		await band.unmount()
+	}
+	const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+	await ui.press({ key: 'agents' })
+	expect(opened).toEqual(['crew'])
+	// Open, the band leaves the button out.
+	expect(await ui.find({ key: 'agents' })).toBeUndefined()
+	// Gone from the engine's panes when the session starts again (closed while the mod was away), it is offered again.
+	panes = []
+	await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+	expect((await ui.find({ key: 'agents' }))?.text).toBe('Agents')
+	// /crew opens it too, and the band follows.
+	await $.command.run({ command: 'crew', args: '' } as any)
+	expect(await ui.find({ key: 'agents' })).toBeUndefined()
+})

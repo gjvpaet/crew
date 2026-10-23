@@ -57,6 +57,7 @@ A 16 px Pip names who is at work: a developer Pip before `N running` while there
 - **Percent:** done ÷ total for whichever source is active.
 - **Running count:** `N running`, the sub-agents currently running. Left out entirely when the turn has no sub-agents (a task-list-only turn); reads `0 running` once every sub-agent has ended.
 - **After the turn ends:** the last state stays visible until the next prompt. `×` hides the band until the next prompt.
+- **Reopening the pane:** while the Agents pane is not drawn (closed by hand, or never opened), the band carries an `Agents` button before `×` that opens it; a press is the person's own, so it is placed at any width. `/crew` and the `open_panel` tool do the same. Every open goes through `openPane`, which notes `isPaneShown` from the open's `isPlaced`; `ui.close` clears it (not on an unload), and `session.start` re-reads it from `$.ui.panes()`, since the engine keeps a pane up across a reload.
 
 ### Agents panel
 
@@ -129,7 +130,7 @@ Each unit has one job. The calculating units import nothing from the UI and are 
 | `panel.tsx` | Draws the dock/inline Agents pane from `view.ts` as cards, SVG Pip and bars off the terminal, half-block text on it. Group headers write `groupOpen`. | `tracker.ts`, `view.ts`, `sprite.ts`, `svg.ts` |
 | `register.tsx` | `register(on)`: subscribes to events, feeds the tracker, keeps state in `$.state`, registers the `/crew` command and the `set_mascot` tool, loads mascot overrides from `$.store` on `session.start`, opens the pane on the first spawn, and installs the band and pane renderers. Listed in `hooks/hooks.json`. | all |
 
-The `$.state` contract (state types, `PluginState`) lives in `types/index.d.ts`: `model`, `isBandHidden`, `groupOpen` (per-group fold overrides, replacing `isFinishedOpen`), `mascots`, `hasAutoOpened`.
+The `$.state` contract (state types, `PluginState`) lives in `types/index.d.ts`: `model`, `isBandHidden`, `groupOpen` (per-group fold overrides, replacing `isFinishedOpen`), `mascots`, `hasAutoOpened`, `isPaneShown` (whether a surface draws the Agents pane).
 
 ### Data flow
 

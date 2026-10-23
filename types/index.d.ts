@@ -77,6 +77,8 @@ declare module 'claude-code' {
 		crew: {
 			model: CrewState
 			isBandHidden: boolean
+			// Whether a surface draws the Agents pane: the band offers it back while it is not.
+			isPaneShown: boolean
 			groupOpen: Record<string, boolean>
 			mascots: MascotPrefs
 			hasAutoOpened: boolean

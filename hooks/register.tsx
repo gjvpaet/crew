@@ -4,7 +4,7 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 import type { AgentStatusView, MascotPrefs } from '../types'
 import { registerBand } from './band'
 import { SET_MASCOT_SPEC, SET_MASCOT_TOOL, applyMascotChange, parseMascotInput, sanitizeMascots } from './mascot'
-import { PANE, registerPanel } from './panel'
+import { openPane, registerPanel, syncPaneShown } from './panel'
 import { TASK_TOOLS } from './tasks'
 import { EMPTY_STATE, isPulsing, isTicking, reduce, type CrewEvent } from './tracker'
 
@@ -74,7 +74,7 @@ async function introducePane($: EngineInterface, isSidebar: boolean | undefined)
 		return true
 	})
 	if (!isFirst) return
-	if (isSidebar === true) void $.ui.open({ id: PANE, title: 'Agents' })
+	if (isSidebar === true) void openPane($)
 	else $.ui.toast('Crew: /crew opens the Agents panel')
 }
 
@@ -100,6 +100,7 @@ export const register: Register = on => {
 		await $.tool.register(SET_MASCOT_SPEC)
 		await $.tool.register(OPEN_PANEL_SPEC)
 		await loadMascots($)
+		await syncPaneShown($)
 		ticker?.cancel()
 		let beat = 0
 		ticker = $.clock.every(BEAT_MS, () => void tick($, ++beat).catch(() => undefined))
@@ -107,7 +108,7 @@ export const register: Register = on => {
 	})
 
 	on('command.run', { command: 'crew' }, async $ => {
-		await $.ui.open({ id: PANE, title: 'Agents' })
+		await openPane($)
 		return { text: 'Crew panel opened.' }
 	})
 
@@ -191,7 +192,7 @@ export const register: Register = on => {
 	on('tool.call', async ($, e, next) => {
 		const tool = String(e.tool)
 		if (tool === OPEN_PANEL_TOOL) {
-			const { isPlaced } = await $.ui.open({ id: PANE, title: 'Agents' })
+			const { isPlaced } = await openPane($)
 			if (!isPlaced) $.ui.toast('Crew: /crew opens the Agents panel')
 			return { result: { ok: true, isPlaced } }
 		}

@@ -2,6 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { On } from 'claude-code'
 
 import type { MascotPrefs } from '../types'
+import { openPane } from './panel'
 import { bandBarSvg, pipHeight, pipSvg, pipWidth } from './svg'
 import { PALETTE } from './sprite'
 import { EMPTY_STATE, isPulsing, MAIN, selectProgress, selectRunning } from './tracker'
@@ -11,6 +12,7 @@ import { bandLine } from './view'
 const model = atom({ plugin: 'crew', key: 'model' } as const, EMPTY_STATE)
 const isBandHidden = atom({ plugin: 'crew', key: 'isBandHidden' } as const, false)
 const mascots = atom({ plugin: 'crew', key: 'mascots' } as const, {} as MascotPrefs)
+const isPaneShown = atom({ plugin: 'crew', key: 'isPaneShown' } as const, false)
 
 const DOT = { running: 'claude', done: 'success', aborted: 'error' } as const
 
@@ -44,6 +46,8 @@ export function registerBand(on: On, onViewport: (isFullscreen: boolean) => void
 		const elements = $.ui.resolve(e)
 		const { Box, Button, Text } = elements
 		const line = bandLine(state, progress, e.props.bodyColumns)
+		// Closed by mistake, the Agents pane comes back from here as well as from /crew.
+		const offerPane = !(await read($, isPaneShown))
 
 		// Desktop drops trailing spaces inside a Text, so on every surface each gap comes from the row's `gap`.
 		// Every surface but the terminal draws the bar, its pill and a mini Pip as SVG.
@@ -108,7 +112,8 @@ export function registerBand(on: On, onViewport: (isFullscreen: boolean) => void
 					<Text dimColor tabular>
 						{line.agentLabel}
 					</Text>
-					<Button key="hide" label="×" plain onPress={() => update($, isBandHidden, () => true)} />
+					{offerPane && <Button key="agents" label="Agents" plain onPress={() => openPane($)} />}
+				<Button key="hide" label="×" plain onPress={() => update($, isBandHidden, () => true)} />
 				</Box>
 			)
 		}
@@ -130,6 +135,7 @@ export function registerBand(on: On, onViewport: (isFullscreen: boolean) => void
 				<Text dimColor tabular>
 					{line.agentLabel}
 				</Text>
+				{offerPane && <Button key="agents" label="Agents" plain onPress={() => openPane($)} />}
 				<Button key="hide" label="×" plain onPress={() => update($, isBandHidden, () => true)} />
 			</Box>
 		)
