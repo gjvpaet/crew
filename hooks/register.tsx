@@ -20,6 +20,12 @@ const groupOpen = atom({ plugin: 'crew', key: 'groupOpen' } as const, {} as Reco
 const BEAT_MS = 200
 const BEATS_PER_SECOND = 5
 
+// Sub-agents keep no task list of their own unless asked, which leaves their bars nothing to measure. Each one is
+// asked, after its task, to keep a short one: Crew reads it off the task-list tool calls as the agent's steps.
+const STEPS_NOTE =
+	'\n\n(Progress for the Crew panel: before you start, write your plan as a task list of 3 to 7 short steps with ' +
+	'your task-list tool (TodoWrite, or TaskCreate and TaskUpdate), then mark each step in progress and completed as you go.)'
+
 // Origins where a person typed the prompt; every other origin (agents, notifications, triggers) continues a turn.
 const PERSON_ORIGINS = new Set(['composer', 'bridge', 'sdk'])
 
@@ -117,7 +123,7 @@ export const register: Register = on => {
 	})
 
 	on('agent.spawn', async ($, e, next) => {
-		const started = await next(e)
+		const started = await next(e.prompt.includes(STEPS_NOTE) ? e : { ...e, prompt: e.prompt + STEPS_NOTE })
 		if (started.deny === undefined && started.agentId) {
 			await apply($, {
 				kind: 'spawn',

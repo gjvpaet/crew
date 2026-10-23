@@ -399,3 +399,43 @@ test('the pulse colour: the accent at a rising opacity on desktop, a solid blend
 	expect(pulseColor('#1D9E75', 1, 'terminal')).toBe('#1D9E75')
 	expect(pulseColor('#1D9E75', 0.55, 'terminal')).toMatch(/^#[0-9A-F]{6}$/)
 })
+
+const PLANNED = reduce(STATE, {
+	kind: 'tasks',
+	call: {
+		tool: 'mcp__ccd_turn__update_plan',
+		input: {
+			items: [
+				{ content: 'Read the design artifact', status: 'completed' },
+				{ content: 'Map the design onto the card', status: 'in_progress' },
+				{ content: 'Write the task plan', status: 'pending' },
+				{ content: 'Verify in Chrome', status: 'pending' }
+			]
+		}
+	}
+})
+
+test("Main's card follows the plan it keeps: its step and a bar to scale", async () => {
+	const main = panelView(PLANNED, {}, 30_000, 20, {}).main
+	expect(main?.steps).toBe('1/4 · Map the design onto the card')
+	expect(main?.fraction).toBe(0.25)
+	// Without a plan of its own this prompt, Main has no steps.
+	expect(panelView(STATE, {}, 30_000, 20, {}).main?.steps).toBe('')
+})
+
+test('Planned lists the plan steps not started yet, numbered as in the plan', async () => {
+	const view = panelView(PLANNED, {}, 30_000, 20, {})
+	expect(view.planned).toEqual([
+		{ number: 3, title: 'Write the task plan' },
+		{ number: 4, title: 'Verify in Chrome' }
+	])
+	expect(view.isPlannedCollapsed).toBe(false)
+	expect(panelView(PLANNED, {}, 30_000, 20, { Planned: false }).isPlannedCollapsed).toBe(true)
+	// A started step leaves the list.
+	const started = reduce(PLANNED, { kind: 'tasks', call: { tool: 'mcp__ccd_turn__update_plan', input: { advance: true } } })
+	expect(panelView(started, {}, 30_000, 20, {}).planned.map(step => step.number)).toEqual([4])
+	// No plan this prompt, nothing planned; a list carried from an earlier prompt is not this prompt's plan.
+	expect(panelView(STATE, {}, 30_000, 20, {}).planned).toEqual([])
+	const carried = reduce(PLANNED, { kind: 'turnStart', at: 40_000, turnId: 't2', text: 'Next thing', isPerson: true })
+	expect(panelView(carried, {}, 40_000, 20, {}).planned).toEqual([])
+})

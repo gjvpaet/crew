@@ -571,3 +571,51 @@ test('a running card border breathes in its own colour; a finished card keeps th
 	expect(String((await terminal.find({ key: 'row-a2' }))?.props.borderColor)).toMatch(/^#[0-9A-F]{6}$/)
 	await terminal.unmount()
 })
+
+test('each sub-agent is asked to keep a task list Crew can show as its progress', async ($, on) => {
+	const prompts: string[] = []
+	mock.clock(on, { now: 1000 })
+	mock.store(on)
+	on('command.register', () => ({ value: { command: 'crew' } }))
+	on('tool.register', () => ({ value: { tool: 'mcp__crew__set_mascot' } }))
+	on('ui.open', () => ({ value: { isPlaced: true } }))
+	on('ui.toast', () => ({ value: undefined }))
+	on('session.start', (_: unknown, e: any) => ({ cwd: e.cwd }))
+	on('turn.start', (_: unknown, e: any) => ({ turnId: e.turnId }))
+	on('agent.spawn', (_: unknown, e: any) => {
+		prompts.push(e.prompt)
+		return { model: 'claude-opus-5-5', agentId: 'a1' }
+	})
+	await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+	await $.turn.start({ text: 'Build it', turnId: 't1' })
+	await $.agent.spawn({ prompt: 'Write the parser.', description: 'Write the parser', subagentType: 'general-purpose' })
+	expect(prompts).toHaveLength(1)
+	// The task comes first and stays whole; the ask follows it.
+	expect(prompts[0].startsWith('Write the parser.')).toBe(true)
+	expect(prompts[0]).toMatch(/task list/)
+	expect(prompts[0]).toMatch(/TodoWrite|TaskCreate/)
+	// Asked once, even when the prompt already carries the ask (a resume, say).
+	await $.agent.spawn({ prompt: prompts[0], description: 'Write the parser', subagentType: 'general-purpose' })
+	expect(prompts[1]).toBe(prompts[0])
+})
+
+test('the pane lists the planned steps under Planned, folding like the other groups', async ($, on) => {
+	await startPlanning($, on)
+	const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	expect((await ui.find({ key: 'group-Planned' }))?.text).toBe('▾ Planned · 1')
+	expect(await ui.find({ type: 'Text', text: /^3\. Write the plan$/ })).toBeDefined()
+	expect((await ui.find({ type: 'Text', text: /1\/3 · Map the design onto the card/ }))).toBeDefined()
+	const [ghost] = await svgs(ui, /planned step/)
+	expect(ghost).toBeDefined()
+	expect(ghost?.props.isInteractive).toBeFalsy()
+	await ui.press({ key: 'group-Planned' })
+	expect((await ui.find({ key: 'group-Planned' }))?.text).toBe('▸ Planned · 1')
+	expect(await ui.find({ type: 'Text', text: /^3\. Write the plan$/ })).toBeUndefined()
+	await ui.press({ key: 'group-Planned' })
+	expect(await ui.find({ type: 'Text', text: /^3\. Write the plan$/ })).toBeDefined()
+	await ui.unmount()
+	const terminal = await $.ui.mount({ ...PANE, surface: 'terminal' })
+	// The terminal lists them too, as text: no SVG there.
+	expect(await terminal.find({ type: 'Text', text: /3\. Write the plan/ })).toBeDefined()
+	await terminal.unmount()
+})

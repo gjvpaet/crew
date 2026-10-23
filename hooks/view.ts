@@ -1,6 +1,7 @@
-import type { AgentRecord, CrewState, MascotPrefs, Role } from '../types'
+import type { AgentRecord, CrewState, MascotPrefs, Role, Steps } from '../types'
 import { bar, clamp, fmtDuration, fmtPercent, fmtTokens, fmtUsd, prettyModel, shimmer, truncate } from './format'
 import { estimateUsd } from './pricing'
+import { taskProgress } from './tasks'
 import { PALETTE, SPECIES_ORDER, spriteCells, type Pose, type Species, type SpriteCell } from './sprite'
 import {
 	MAIN,
@@ -108,6 +109,9 @@ export type RowView = {
 
 export type GroupView = { name: string; count: number; rows: RowView[]; isCollapsed: boolean; isCollapsible: boolean }
 
+// A step of Main's plan not started yet, numbered as the plan numbers it.
+export type PlannedStep = { number: number; title: string }
+
 export type PanelView = {
 	cost: string
 	tokens: string
@@ -115,6 +119,8 @@ export type PanelView = {
 	session: string
 	main: RowView | null
 	groups: GroupView[]
+	planned: PlannedStep[]
+	isPlannedCollapsed: boolean
 	isEmpty: boolean
 }
 
@@ -132,8 +138,10 @@ const BUSY = new Set<AgentRecord['status']>(['running', 'pending', 'waiting'])
 
 const selectBusy = (state: CrewState) => state.order.filter(id => BUSY.has(state.agents[id]?.status ?? 'completed')).length
 
-function fractionOf(agent: AgentRecord, tone: Tone, isMainWaiting: boolean): number | null {
-	const steps = agent.steps
+// This prompt's own plan: one carried from an earlier prompt and not touched since is not shown.
+const planOf = (state: CrewState) => (state.tasks.length > 0 && !state.areTasksCarried ? state.tasks : [])
+
+function fractionOf(steps: Steps | undefined, tone: Tone, isMainWaiting: boolean): number | null {
 	if (steps && steps.total > 0) return steps.done / steps.total
 	if (tone === 'done' || tone === 'failed') return 1
 	// Main waiting on its agents is still at work: it shimmers rather than sitting empty.
@@ -193,14 +201,16 @@ function rowView(
 	const cost = tokens > 0 ? estimateUsd(agent.usage, agent.model ?? '') : 0
 	const startedAt = agent.id === MAIN ? (state.turn?.startedAt ?? agent.spawnedAt) : agent.spawnedAt
 	const endedAt = agent.id === MAIN ? (state.turn?.endedAt ?? agent.endedAt) : agent.endedAt
-	const steps = agent.steps
+	// Main is the planner: its steps are the plan it keeps, when it keeps one this prompt.
+	const plan = agent.id === MAIN ? planOf(state) : []
+	const steps = plan.length > 0 ? taskProgress(plan) : agent.steps
 	const parent = agent.parentId ? state.agents[agent.parentId] : undefined
 	const waitingNote = isMainWaiting ? `waiting on ${busy} agent${busy === 1 ? '' : 's'}` : ''
 	const asides = [parent ? `↳ from ${parent.description}` : ''].filter(Boolean)
 	const mark = tone === 'done' ? '✓' : tone === 'failed' ? '✗' : ''
 	// "stopped" rides in the ✗ badge, one short unit on line 1 that keeps its width and never wraps away.
 	const markBadge = agent.status === 'stopped' && !isMainWaiting ? `${mark} stopped` : mark
-	const fraction = fractionOf(agent, tone, isMainWaiting)
+	const fraction = fractionOf(steps, tone, isMainWaiting)
 	const model = prettyModel(agent.model)
 	const usageText = [`ctx ${fmtPercent(contextFraction(agent))}`, fmtTokens(tokens), fmtUsd(cost)].join(' · ')
 	const elapsed = fmtDuration((endedAt ?? now) - startedAt)
@@ -280,6 +290,10 @@ export function panelView(
 				isCollapsed: !(groupOpen[name] ?? isOpenByDefault(name, state)),
 				isCollapsible: true
 			})),
+		planned: planOf(state).flatMap((task, index) =>
+			task.status === 'pending' ? [{ number: index + 1, title: task.title }] : []
+		),
+		isPlannedCollapsed: !(groupOpen.Planned ?? true),
 		isEmpty: state.order.length === 0
 	}
 }

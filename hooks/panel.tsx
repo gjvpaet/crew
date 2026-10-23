@@ -18,6 +18,7 @@ const mascots = atom({ plugin: 'crew', key: 'mascots' } as const, {} as MascotPr
 const TONE: Record<Tone, string> = { running: 'claude', waiting: 'inactive', done: 'success', failed: 'error' }
 
 const PIP_PX = 32
+const PLANNED_PIP_PX = 16
 
 const SPECIES_NAMES: Record<Species, string> = {
 	pip: 'Pip',
@@ -178,6 +179,38 @@ export function registerPanel(on: On) {
 						{!group.isCollapsed && group.rows.map(agentCard)}
 					</Box>
 				))}
+				{view.planned.length > 0 && (
+					<Box key="section-Planned" flexDirection="column">
+						<Button
+							key="group-Planned"
+							plain
+							label={`${view.isPlannedCollapsed ? '▸' : '▾'} Planned · ${view.planned.length}`}
+							onPress={() => toggle($, 'Planned')}
+						/>
+						{/* Main's steps not started yet: a faded Pip, the step as the plan numbers it, and a clock. */}
+						{!view.isPlannedCollapsed &&
+							view.planned.map(step => (
+								<Box key={`planned-${step.number}`} flexDirection="row" gap={1} paddingX={1} alignItems="center">
+									{Svg && (
+										<Box alignSelf="center">
+											<Svg
+												source={pipSvg('plain', prefs, PLANNED_PIP_PX, { pose: 'stopped' })}
+												alt="planned step"
+												width={pipWidth(PLANNED_PIP_PX)}
+												height={pipHeight(PLANNED_PIP_PX)}
+											/>
+										</Box>
+									)}
+									<Box flexGrow={1} flexShrink={1}>
+										<Text dimColor wrap="truncate-end">
+											{`${step.number}. ${step.title}`}
+										</Text>
+									</Box>
+									<Text dimColor>◷</Text>
+								</Box>
+							))}
+					</Box>
+				)}
 			</Box>
 		)
 	})
