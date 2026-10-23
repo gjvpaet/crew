@@ -2,8 +2,8 @@ import { atom, read, update } from 'claude-code'
 import type { On } from 'claude-code'
 
 import type { MascotPrefs } from '../types'
-import { bandBarSvg, pipSvg } from './svg'
-import { EMPTY_STATE, selectProgress } from './tracker'
+import { bandBarSvg, pipHeight, pipSvg } from './svg'
+import { EMPTY_STATE, selectProgress, selectRunning } from './tracker'
 import { bandLine } from './view'
 
 // The engine's scan follows state refs only through consts of the same file, so each file declares its own.
@@ -36,6 +36,7 @@ export function registerBand(on: On, onViewport: (isFullscreen: boolean) => void
 		if (e.surface !== 'terminal' && 'Svg' in elements) {
 			const { Svg } = elements
 			const prefs = await read($, mascots)
+			const isAnyRunning = selectRunning(state) > 0
 			return (
 				<Box flexDirection="row" gap={1} alignItems="center">
 					<Text color={DOT[line.tone]}>●</Text>
@@ -62,10 +63,12 @@ export function registerBand(on: On, onViewport: (isFullscreen: boolean) => void
 					{line.runningLabel && (
 						<Box alignSelf="center">
 							<Svg
-								source={pipSvg('developer', prefs, MINI_PIP_PX)}
+								source={pipSvg('developer', prefs, MINI_PIP_PX, { pose: isAnyRunning ? 'running' : 'still' })}
 								alt="developer mascot"
 								width={MINI_PIP_PX}
-								height={MINI_PIP_PX}
+								height={pipHeight(MINI_PIP_PX)}
+								// It moves while any sub-agent works, and rests once none do.
+								isInteractive={isAnyRunning}
 							/>
 						</Box>
 					)}

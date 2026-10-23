@@ -1,6 +1,6 @@
 import type { MascotPrefs, Role } from '../types'
 import { clamp } from './format'
-import { spritePixels } from './sprite'
+import { spritePixels, type Look } from './sprite'
 
 const XMLNS = 'http://www.w3.org/2000/svg'
 
@@ -21,25 +21,52 @@ function rect(name: string, x: number, width: number, y: number, height: number,
 	return `<rect class="${name}" x="${num(x)}" y="${num(y)}" width="${num(width)}" height="${num(height)}" rx="${num(height / 2)}" fill="${fill}"${extra}/>`
 }
 
-// The panel redraws every second; a Pip only changes with its role, its prefs or its size.
-const PIP_CACHE = new Map<string, string>()
-const PIP_CACHE_LIMIT = 64
+// A row of headroom above the 8×8 sprite, so a bob never clips a hat: the drawing is 9 pixels tall for 8 wide.
+export const pipHeight = (size: number) => Math.round((size * 9) / 8)
 
-export function pipSvg(role: Role, prefs: MascotPrefs, size: number): string {
-	const key = `${role}|${size}|${JSON.stringify(prefs[role] ?? {})}`
+// The panel redraws every second; a Pip only changes with its role, its prefs, its size or its look. Keeping the
+// markup identical between redraws also keeps a running Pip's animation where it is.
+const PIP_CACHE = new Map<string, string>()
+const PIP_CACHE_LIMIT = 128
+
+export function pipSvg(role: Role, prefs: MascotPrefs, size: number, look: Look = {}): string {
+	// `frame` is the terminal's beat; the SVG animates itself, so it is left out of the drawing and the key.
+	const { frame: _frame, ...drawn } = look
+	const key = `${role}|${size}|${JSON.stringify(prefs[role] ?? {})}|${JSON.stringify(drawn)}`
 	const cached = PIP_CACHE.get(key)
 	if (cached !== undefined) return cached
 	if (PIP_CACHE.size >= PIP_CACHE_LIMIT) PIP_CACHE.clear()
-	const svg = drawPip(role, prefs, size)
+	const svg = drawPip(role, prefs, size, drawn)
 	PIP_CACHE.set(key, svg)
 	return svg
 }
 
-function drawPip(role: Role, prefs: MascotPrefs, size: number): string {
-	const pixels = spritePixels(role, prefs)
-		.map(({ x, y, fill }) => `<rect x="${x}" y="${y}" width="1" height="1" fill="${fill}"/>`)
-		.join('')
-	return `<svg xmlns="${XMLNS}" viewBox="0 0 8 8" width="${num(size)}" height="${num(size)}" shape-rendering="crispEdges">${pixels}</svg>`
+const pixelRect = (x: number, y: number, fill: string) => `<rect x="${x}" y="${y}" width="1" height="1" fill="${fill}"/>`
+
+// Running: the body bobs half a pixel and the eyes blink once every few seconds. SMIL, so it plays in the
+// sandboxed frame an interactive Svg is drawn in, with no script.
+const BOB = '<animateTransform attributeName="transform" type="translate" values="0 0;0 -0.5;0 0" dur="0.8s" repeatCount="indefinite"/>'
+const BLINK = '<animate attributeName="opacity" values="1;1;0;1" keyTimes="0;0.92;0.96;1" dur="3s" repeatCount="indefinite"/>'
+
+function drawPip(role: Role, prefs: MascotPrefs, size: number, look: Look): string {
+	let body = ''
+	let eyes = ''
+	for (const { x, y, fill, eye, under } of spritePixels(role, prefs, look)) {
+		if (!eye) {
+			body += pixelRect(x, y, fill)
+			continue
+		}
+		body += pixelRect(x, y, under ?? fill)
+		// A shut eye is a lid line across the body; an open one a whole pixel of eye colour.
+		eyes +=
+			eye === 'closed'
+				? `<rect x="${x}" y="${num(y + 0.45)}" width="1" height="0.35" fill="${fill}"/>`
+				: pixelRect(x, y, fill)
+	}
+	const isRunning = look.pose === 'running'
+	const sprite = `<g>${isRunning ? BOB : ''}${body}<g>${isRunning ? BLINK : ''}${eyes}</g></g>`
+	const faded = look.pose === 'stopped' ? `<g opacity="0.45">${sprite}</g>` : sprite
+	return `<svg xmlns="${XMLNS}" viewBox="0 -1 8 9" width="${num(size)}" height="${num(pipHeight(size))}" shape-rendering="crispEdges">${faded}</svg>`
 }
 
 export type BarSvgInput = { fraction: number; width: number; height: number; color: string; now?: number; isShimmer?: boolean }

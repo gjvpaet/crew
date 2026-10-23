@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { PALETTE } from '../hooks/sprite'
+import { PALETTE, SPECIES_ORDER } from '../hooks/sprite'
 import { EMPTY_STATE, reduce, selectProgress, type CrewEvent } from '../hooks/tracker'
 import { ACCENTS, COLLAPSE_AFTER, bandLine, effortToneOf, panelView, toggleGroup } from '../hooks/view'
 
@@ -340,4 +340,32 @@ test('a stored envelope label is never drawn', async () => {
 	const progress = selectProgress(stale)
 	if (!progress) throw new Error('expected progress')
 	expect(bandLine(stale, progress, 100).label).toBe('Working')
+})
+
+test('each sub-agent takes the species in the slot of its colour; Main is Pip', async () => {
+	const view = panelView(STATE, {}, 30_000, 20, {})
+	expect(view.main?.species).toBe('pip')
+	const rows = view.groups.flatMap(group => group.rows)
+	expect(new Set(rows.map(row => row.species)).size).toBe(rows.length)
+	for (const row of rows) expect(row.species).toBe(SPECIES_ORDER[ACCENTS.indexOf(row.accent)])
+})
+
+test('the pose follows the state: running, still, paused or stopped', async () => {
+	const view = panelView(STATE, {}, 30_000, 20, {})
+	const byId = Object.fromEntries(view.groups.flatMap(group => group.rows).map(row => [row.id, row.pose]))
+	expect(byId.a1).toBe('still')
+	expect(byId.a2).toBe('running')
+	expect(view.main?.pose).toBe('running')
+	const waiting = reduce(STATE, { kind: 'turnEnd', at: 21_000, isAborted: false, reason: 'answer' } as CrewEvent)
+	expect(panelView(waiting, {}, 30_000, 20, {}).main?.pose).toBe('paused')
+	const stopped = reduce(STATE, { kind: 'statuses', at: 22_000, list: [{ id: 'a3', status: 'stopped' }] })
+	const rowsAfter = panelView(stopped, {}, 30_000, 20, {}).groups.flatMap(group => group.rows)
+	expect(rowsAfter.find(row => row.id === 'a3')?.pose).toBe('stopped')
+})
+
+test('on the terminal a running mascot changes from one second to the next; a finished one does not', async () => {
+	const at = (now: number) => panelView(STATE, {}, now, 20, {}).groups.flatMap(group => group.rows)
+	const [a, b] = [at(30_000), at(31_000)]
+	expect(a.find(row => row.id === 'a2')?.sprite).not.toEqual(b.find(row => row.id === 'a2')?.sprite)
+	expect(a.find(row => row.id === 'a1')?.sprite).toEqual(b.find(row => row.id === 'a1')?.sprite)
 })

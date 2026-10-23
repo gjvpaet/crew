@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import { PALETTE, spriteCells, spriteGrid, spritePixels } from '../hooks/sprite'
-import { bandBarSvg, barSvg, escapeXml, pipSvg } from '../hooks/svg'
+import { bandBarSvg, barSvg, escapeXml, pipHeight, pipSvg } from '../hooks/svg'
 
 const rects = (svg: string) => svg.match(/<rect\b[^>]*>/g) ?? []
 const part = (svg: string, name: string) => rects(svg).find(rect => rect.includes(`class="${name}"`))
@@ -21,7 +21,7 @@ test('spritePixels lists every non-empty pixel with its colour', async () => {
 	const filled = grid.join('').replace(/\./g, '').length
 	const pixels = spritePixels('developer', {})
 	expect(pixels).toHaveLength(filled)
-	expect(pixels).toContainEqual({ x: 2, y: 4, fill: PALETTE.eye })
+	expect(pixels).toContainEqual({ x: 2, y: 4, fill: PALETTE.eye, eye: 'open', under: PALETTE.body })
 	expect(pixels.every(pixel => /^#[0-9A-Fa-f]{6}$/.test(pixel.fill))).toBe(true)
 	// The half-block sprite is drawn from the same pixels.
 	const cells = spriteCells('developer', {})
@@ -33,11 +33,15 @@ test('spritePixels lists every non-empty pixel with its colour', async () => {
 test('pipSvg draws one crisp rect per pixel', async () => {
 	const svg = pipSvg('researcher', {}, 32)
 	expect(isWellFormed(svg)).toBe(true)
-	expect(svg).toContain('viewBox="0 0 8 8"')
+	// A row of headroom above the sprite, so a bob never clips a hat.
+	expect(svg).toContain('viewBox="0 -1 8 9"')
 	expect(svg).toContain('width="32"')
-	expect(svg).toContain('height="32"')
+	expect(svg).toContain('height="36"')
+	expect(pipHeight(32)).toBe(36)
 	expect(svg).toContain('shape-rendering="crispEdges"')
-	expect(rects(svg)).toHaveLength(spritePixels('researcher', {}).length)
+	// One rect per pixel, plus the body under each eye.
+	const pixels = spritePixels('researcher', {})
+	expect(rects(svg)).toHaveLength(pixels.length + pixels.filter(pixel => pixel.eye).length)
 	expect(rects(svg).every(rect => rect.includes('width="1"') && rect.includes('height="1"'))).toBe(true)
 	expect(svg).toContain(`fill="${PALETTE.eye}"`)
 })
@@ -137,4 +141,26 @@ test('pipSvg gives the same drawing again and follows a prefs change', async () 
 	expect(pipSvg('designer', { designer: { accessory: 'hardhat' } }, 32)).toBe(hardhat)
 	expect(pipSvg('designer', {}, 16)).not.toBe(first)
 	expect(pipSvg('designer', {}, 32)).toBe(first)
+})
+
+test('only a running Pip moves: it bobs and blinks', async () => {
+	const look = { species: 'wisp' as const, body: '#D85A30' }
+	const running = pipSvg('plain', {}, 32, { ...look, pose: 'running' })
+	expect(isWellFormed(running)).toBe(true)
+	expect(running).toContain('<animateTransform')
+	expect(running).toContain('attributeName="opacity"')
+	expect(running).toContain('repeatCount="indefinite"')
+	for (const pose of ['still', 'paused', 'stopped'] as const) {
+		expect(pipSvg('plain', {}, 32, { ...look, pose })).not.toContain('<animate')
+	}
+	expect(pipSvg('plain', {}, 32, { ...look, pose: 'stopped' })).toContain('opacity="0.45"')
+	// Each look is drawn once and its markup held: the same look gives the same string.
+	expect(pipSvg('plain', {}, 32, { ...look, pose: 'running' })).toBe(running)
+	expect(pipSvg('plain', {}, 32, { ...look, species: 'bolt', pose: 'running' })).not.toBe(running)
+})
+
+test('a paused Pip draws each shut eye as a lid line over the body', async () => {
+	const svg = pipSvg('plain', {}, 32, { pose: 'paused', body: '#1D9E75' })
+	expect(svg).not.toContain(`fill="${PALETTE.eye}"`)
+	expect(rects(svg).filter(rect => rect.includes('height="0.35"'))).toHaveLength(2)
 })

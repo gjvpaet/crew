@@ -3,8 +3,8 @@ import type { EngineInterface, On } from 'claude-code'
 
 import type { MascotPrefs } from '../types'
 import { clamp } from './format'
-import type { SpriteCell } from './sprite'
-import { barSvg, pipSvg } from './svg'
+import type { Species, SpriteCell } from './sprite'
+import { barSvg, pipHeight, pipSvg } from './svg'
 import { EMPTY_STATE } from './tracker'
 import { panelView, toggleGroup, type RowView, type Tone } from './view'
 
@@ -18,6 +18,15 @@ const mascots = atom({ plugin: 'crew', key: 'mascots' } as const, {} as MascotPr
 const TONE: Record<Tone, string> = { running: 'claude', waiting: 'inactive', done: 'success', failed: 'error' }
 
 const PIP_PX = 32
+
+const SPECIES_NAMES: Record<Species, string> = {
+	pip: 'Pip',
+	bolt: 'Bolt',
+	mochi: 'Mochi',
+	wisp: 'Wisp',
+	sprout: 'Sprout',
+	bloop: 'Bloop'
+}
 const BAR_PX = 6
 // A card's frame, its padding, the 8-cell sprite and the gap after it: what the text bar leaves to the rest.
 const CARD_CHROME = 13
@@ -58,7 +67,14 @@ export function registerPanel(on: On) {
 
 		const mascot = (row: RowView) =>
 			Svg ? (
-				<Svg source={pipSvg(row.role, prefs, PIP_PX)} alt={`${row.role} mascot`} width={PIP_PX} height={PIP_PX} />
+				<Svg
+					source={pipSvg(row.role, prefs, PIP_PX, { species: row.species, body: row.accent, pose: row.pose })}
+					alt={`${SPECIES_NAMES[row.species]} the ${row.role} mascot, ${row.pose}`}
+					width={PIP_PX}
+					height={pipHeight(PIP_PX)}
+					// A live frame only while it runs, so it can bob and blink; every other pose is a still image.
+					isInteractive={row.pose === 'running'}
+				/>
 			) : (
 				<Box flexDirection="column">
 					{row.sprite.map(cells => (

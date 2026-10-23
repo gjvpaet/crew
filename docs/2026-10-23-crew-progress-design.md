@@ -71,6 +71,17 @@ That is the terminal. On desktop, vscode and mobile the bar is one 200×18 px SV
 
 - One **original** 8×8 pixel character, "Pip", created for this mod: a round bean body with dot eyes and stubby feet. It is not based on any existing mascot or brand character, including the crabs in the inspiring mod and Anthropic's mascot.
 - Drawn as half-block cells (4 rows of 8) on the terminal and as one SVG rect per pixel elsewhere, both from the same pixel list (`spritePixels`).
+- **Six species**, all original, all 8×8 with their eyes on row 4 and their heads under the hat rows: Pip (bean), Bolt (boxy robot with an antenna), Mochi (cat ears), Wisp (ghost with a wavy hem), Sprout (leaf on top) and Bloop (wide, with arms). Main is always Pip in `#7C9CF5`. Each sub-agent takes the species in the slot of its colour (`SPECIES_ORDER[slot]`, the same slot as its accent), painted in that colour, so neighbours never look alike. A role's `set_mascot` body colour still wins.
+- **Pose follows the agent's state**, so running agents stand out at a glance:
+
+  | State | Pose | Desktop, vscode, mobile | Terminal |
+  |---|---|---|---|
+  | Running | `running` | Bobs half a pixel and blinks (SMIL), drawn with `isInteractive` so it plays | Eyes glance right on odd seconds |
+  | Waiting, pending, idle, Main waiting on agents | `paused` | Still, eyes shut (a lid line) | Still, eyes shut |
+  | Finished | `still` | Still | Still |
+  | Stopped, failed, killed | `stopped` | Still, grey, 45% opacity | Still, grey |
+
+  Every pose but `running` is a plain image. The SVG has a row of headroom (`viewBox 0 -1 8 9`, height 9/8 of its width) so the bob never clips a hat, and its markup is cached per look so a redraw leaves the animation where it is. The band's mini Pip moves while any sub-agent runs.
 - Accessory by role:
 
   | Role | Accessory |

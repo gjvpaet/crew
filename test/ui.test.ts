@@ -85,6 +85,9 @@ test('on desktop the band draws its bar, pill and a mini Pip as SVG', async ($, 
 	const [pip] = await svgs(ui, /mascot/)
 	expect(String(pip?.props.source)).toContain('shape-rendering="crispEdges"')
 	expect(pip?.props.width).toBe(16)
+	// Sub-agents are running, so the band's Pip moves too.
+	expect(pip?.props.isInteractive).toBe(true)
+	expect(String(pip?.props.source)).toContain('<animateTransform')
 	expect((await ui.find({ type: 'Text', text: /running/ }))?.text).toBe('2 running')
 	// The pill lives in the SVG on desktop, never as a second text.
 	expect(await ui.find({ type: 'Text', text: /Agents 0\/2/ })).toBeUndefined()
@@ -126,7 +129,12 @@ test('on desktop every agent card draws Pip and its bar as SVG', async ($, on) =
 	const pips = await svgs(ui, /mascot/)
 	expect(pips).toHaveLength(3)
 	expect(pips.every(pip => String(pip.props.source).includes('shape-rendering="crispEdges"'))).toBe(true)
-	expect(pips.every(pip => pip.props.width === 32 && pip.props.height === 32)).toBe(true)
+	expect(pips.every(pip => pip.props.width === 32 && pip.props.height === 36)).toBe(true)
+	// All three are at work: each Pip is drawn live, so it can bob and blink.
+	expect(pips.every(pip => pip.props.isInteractive === true)).toBe(true)
+	expect(pips.every(pip => String(pip.props.source).includes('<animateTransform'))).toBe(true)
+	// Two sub-agents, two different species.
+	expect(new Set(pips.map(pip => String(pip.props.alt).split(' ')[0])).size).toBe(3)
 	const bars = await svgs(ui, /progress/)
 	expect(bars).toHaveLength(3)
 	// Running with no steps: a shimmer in the agent's own accent.
@@ -208,14 +216,14 @@ test('an ended agent keeps its notes: stopped and where it came from', async ($,
 test('set_mascot redraws that role\'s Pip on desktop', async ($, on) => {
 	await startTwoAgents($, on)
 	const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-	const [before] = await svgs(ui, /^developer mascot$/)
+	const [before] = await svgs(ui, / the developer mascot, /)
 	expect(before?.props.width).toBe(32)
 	expect(String(before?.props.source)).not.toContain('#112233')
 	await $.tool.call({ tool: 'mcp__crew__set_mascot', role: 'developer', body: '#112233' } as any)
-	const [after] = await svgs(ui, /^developer mascot$/)
+	const [after] = await svgs(ui, / the developer mascot, /)
 	expect(String(after?.props.source)).toContain('fill="#112233"')
 	// Only that role changes.
-	const [researcher] = await svgs(ui, /^researcher mascot$/)
+	const [researcher] = await svgs(ui, / the researcher mascot, /)
 	expect(String(researcher?.props.source)).not.toContain('#112233')
 	await ui.unmount()
 })
@@ -474,4 +482,17 @@ test('the header cards share the pane width in three equal parts', async ($, on)
 		}
 		await ui.unmount()
 	}
+})
+
+test("a finished agent's Pip is a still picture", async ($, on) => {
+	await startTwoAgents($, on)
+	await $.turn.complete({ turnId: 's', agentId: 'a1', answer: 'x', durationMs: 1, isAborted: false, reason: 'answer' } as any)
+	const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	const finished = (await svgs(ui, /mascot, still$/))
+	expect(finished.length).toBeGreaterThan(0)
+	for (const pip of finished) {
+		expect(pip.props.isInteractive).toBeFalsy()
+		expect(String(pip.props.source)).not.toContain('<animate')
+	}
+	await ui.unmount()
 })

@@ -1,7 +1,7 @@
 import type { AgentRecord, CrewState, MascotPrefs, Role } from '../types'
 import { bar, clamp, fmtDuration, fmtPercent, fmtTokens, fmtUsd, prettyModel, shimmer, truncate } from './format'
 import { estimateUsd } from './pricing'
-import { PALETTE, spriteCells, type SpriteCell } from './sprite'
+import { PALETTE, SPECIES_ORDER, spriteCells, type Pose, type Species, type SpriteCell } from './sprite'
 import {
 	MAIN,
 	contextFraction,
@@ -86,6 +86,9 @@ export type RowView = {
 	accent: string
 	tone: Tone
 	role: Role
+	// The mascot: its species (in the slot of its accent) and its pose, which only moves while it runs.
+	species: Species
+	pose: Pose
 	sprite: SpriteCell[][]
 }
 
@@ -125,11 +128,18 @@ function fractionOf(agent: AgentRecord, tone: Tone, isMainWaiting: boolean): num
 }
 
 // A record saved before colours were stored has no index: its place in the order stands in.
+const slotOf = (agent: AgentRecord, state: CrewState) => agent.colorIndex ?? Math.max(0, state.order.indexOf(agent.id))
+
 function accentOf(agent: AgentRecord, state: CrewState): string {
 	if (agent.id === MAIN) return PALETTE.body
-	const index = agent.colorIndex ?? Math.max(0, state.order.indexOf(agent.id))
-	return ACCENTS[index % ACCENTS.length]
+	return ACCENTS[slotOf(agent, state) % ACCENTS.length]
 }
+
+// The same slot as the colour, so a species and its colour travel together and neighbours never look alike.
+const speciesOf = (agent: AgentRecord, state: CrewState): Species =>
+	agent.id === MAIN ? 'pip' : SPECIES_ORDER[slotOf(agent, state) % SPECIES_ORDER.length]
+
+const POSES: Record<Tone, Pose> = { running: 'running', waiting: 'paused', done: 'still', failed: 'stopped' }
 
 export type PanelOptions = { sprites?: boolean }
 
@@ -160,6 +170,9 @@ function rowView(
 	const model = prettyModel(agent.model)
 	const usageText = [`ctx ${fmtPercent(contextFraction(agent))}`, fmtTokens(tokens), fmtUsd(cost)].join(' · ')
 	const elapsed = fmtDuration((endedAt ?? now) - startedAt)
+	const accent = accentOf(agent, state)
+	const species = speciesOf(agent, state)
+	const pose = POSES[tone]
 	return {
 		id: agent.id,
 		title: agent.description,
@@ -177,10 +190,16 @@ function rowView(
 		aside: isMainWaiting ? '' : asides.join(' · '),
 		bar: fraction === null ? shimmer(barWidth, now) : bar(fraction, barWidth),
 		fraction,
-		accent: accentOf(agent, state),
+		accent,
 		tone,
 		role: agent.role,
-		sprite: options.sprites === false ? [] : spriteCells(agent.role, prefs)
+		species,
+		pose,
+		// The terminal redraws each second while anything runs: the second's parity is a running mascot's beat.
+		sprite:
+			options.sprites === false
+				? []
+				: spriteCells(agent.role, prefs, { species, body: accent, pose, frame: Math.floor(now / 1000) % 2 })
 	}
 }
 
