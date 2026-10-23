@@ -21,12 +21,6 @@ function rect(name: string, x: number, width: number, y: number, height: number,
 	return `<rect class="${name}" x="${num(x)}" y="${num(y)}" width="${num(width)}" height="${num(height)}" rx="${num(height / 2)}" fill="${fill}"${extra}/>`
 }
 
-// Clear space above a drawing: the same drawing, nested `pad` pixels down in a box that much taller.
-export function padTop(svg: string, width: number, height: number, pad: number): string {
-	if (pad <= 0) return svg
-	return `${svgOpen(width, height + pad)}${svg.replace('<svg ', `<svg y="${num(pad)}" `)}</svg>`
-}
-
 // The panel redraws every second; a Pip only changes with its role, its prefs or its size.
 const PIP_CACHE = new Map<string, string>()
 const PIP_CACHE_LIMIT = 64

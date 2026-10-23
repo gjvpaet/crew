@@ -36,7 +36,7 @@ From the Claude Code mods docs (overview, reference, events, interface, api):
 ```
 
 Every gap between segments comes from the row's `gap`, never from spaces inside a text (Desktop drops trailing spaces).
-Desktop rests an `Svg` on the text baseline, so the band's bar and mini Pip carry clear space above the drawing (6px and 4px) to sit level with the text.
+Desktop lines the band up on the text baseline, where an image rests its bottom edge, so each band `Svg` sits in a Box with `alignSelf="center"`.
 
 That is the terminal. On desktop, vscode and mobile the bar is one 200×18 px SVG with the pill (`Tasks 3/5`) drawn inside it (purple pill, violet `#7F77DD` fill). The pill sits at the end away from the fill's edge (right while under half done, left from half on), so it never hides the progress, and a 16 px developer Pip sits before `N running`.
 
