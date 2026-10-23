@@ -76,12 +76,12 @@ That is the terminal. On desktop, vscode and mobile the bar is one 200×18 px SV
 
   | State | Pose | Desktop, vscode, mobile | Terminal |
   |---|---|---|---|
-  | Running | `running` | Bobs half a pixel and blinks (SMIL), drawn with `isInteractive` so it plays | Eyes glance right on odd seconds |
+  | Running | `running` | Hops a whole sprite pixel on a 0.7s beat, stretching on take-off and squashing on landing about its feet, and blinks (SMIL), drawn with `isInteractive` so it plays | Eyes glance right on odd seconds |
   | Waiting, pending, idle, Main waiting on agents | `paused` | Still, eyes shut (a lid line) | Still, eyes shut |
   | Finished | `still` | Still | Still |
   | Stopped, failed, killed | `stopped` | Still, grey, 45% opacity | Still, grey |
 
-  Every pose but `running` is a plain image. The SVG has a row of headroom (`viewBox 0 -1 8 9`, height 9/8 of its width) so the bob never clips a hat, and its markup is cached per look so a redraw leaves the animation where it is. The band's mini Pip moves while any sub-agent runs.
+  Every pose but `running` is a plain image. The SVG has a row of headroom (`viewBox 0 -1 8 9`, height 9/8 of its width) so the hop never clips a hat, and its markup is cached per look so a redraw leaves the animation where it is. The band's mini Pip moves while any sub-agent runs.
 - Accessory by role:
 
   | Role | Accessory |

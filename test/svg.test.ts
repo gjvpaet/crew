@@ -164,3 +164,20 @@ test('a paused Pip draws each shut eye as a lid line over the body', async () =>
 	expect(svg).not.toContain(`fill="${PALETTE.eye}"`)
 	expect(rects(svg).filter(rect => rect.includes('height="0.35"'))).toHaveLength(2)
 })
+
+test('a running Pip hops a whole pixel and squashes on landing, inside its headroom', async () => {
+	const running = pipSvg('plain', {}, 32, { species: 'bolt', body: '#1D9E75', pose: 'running' })
+	const hop = /<animateTransform attributeName="transform" type="translate" values="([^"]*)"/.exec(running)?.[1] ?? ''
+	const rises = hop.split(';').map(pair => 0 - Number(pair.trim().split(/\s+/)[1]))
+	// A whole sprite pixel at the top of the hop (4px at 32px), and never past the one row of headroom.
+	expect(Math.max(...rises)).toBe(1)
+	expect(Math.min(...rises)).toBe(0)
+	// The squash scales about the feet, so they stay planted while the body flattens and stretches.
+	expect(running).toContain('<g transform="translate(4 8)">')
+	expect(running).toMatch(/<animateTransform attributeName="transform" type="scale" values="[^"]*"/)
+	expect(running).toContain('<g transform="translate(-4 -8)">')
+	// Hop and squash share one beat, so the landing and the squash always meet.
+	const durations = [...running.matchAll(/type="(?:translate|scale)"[^>]*dur="([^"]*)"/g)].map(match => match[1])
+	expect(durations).toHaveLength(2)
+	expect(new Set(durations).size).toBe(1)
+})

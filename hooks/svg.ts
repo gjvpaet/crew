@@ -43,9 +43,16 @@ export function pipSvg(role: Role, prefs: MascotPrefs, size: number, look: Look 
 
 const pixelRect = (x: number, y: number, fill: string) => `<rect x="${x}" y="${y}" width="1" height="1" fill="${fill}"/>`
 
-// Running: the body bobs half a pixel and the eyes blink once every few seconds. SMIL, so it plays in the
-// sandboxed frame an interactive Svg is drawn in, with no script.
-const BOB = '<animateTransform attributeName="transform" type="translate" values="0 0;0 -0.5;0 0" dur="0.8s" repeatCount="indefinite"/>'
+// Running: a hop, one beat on repeat. It rises a whole sprite pixel (the one row of headroom), eases down and rests a
+// moment; it stretches a touch on take-off and squashes on landing, about the feet so they stay planted. The eyes
+// blink once every few seconds. SMIL, so it plays in the sandboxed frame an interactive Svg is drawn in, with no script.
+const BEAT = '0.7s'
+const HOP =
+	`<animateTransform attributeName="transform" type="translate" values="0 0;0 -1;0 0;0 0" keyTimes="0;0.35;0.7;1" ` +
+	`calcMode="spline" keySplines="0.2 0.6 0.4 1;0.6 0 0.8 0.4;0 0 1 1" dur="${BEAT}" repeatCount="indefinite"/>`
+const SQUASH =
+	`<animateTransform attributeName="transform" type="scale" values="1 1;0.96 1.04;1 1;1 1;1.08 0.86;1 1" ` +
+	`keyTimes="0;0.1;0.3;0.7;0.8;1" dur="${BEAT}" repeatCount="indefinite"/>`
 const BLINK = '<animate attributeName="opacity" values="1;1;0;1" keyTimes="0;0.92;0.96;1" dur="3s" repeatCount="indefinite"/>'
 
 function drawPip(role: Role, prefs: MascotPrefs, size: number, look: Look): string {
@@ -64,7 +71,11 @@ function drawPip(role: Role, prefs: MascotPrefs, size: number, look: Look): stri
 				: pixelRect(x, y, fill)
 	}
 	const isRunning = look.pose === 'running'
-	const sprite = `<g>${isRunning ? BOB : ''}${body}<g>${isRunning ? BLINK : ''}${eyes}</g></g>`
+	const drawn = `${body}<g>${isRunning ? BLINK : ''}${eyes}</g>`
+	// The squash pivots on the feet: move them to the origin, scale, and move them back.
+	const sprite = isRunning
+		? `<g>${HOP}<g transform="translate(4 8)"><g>${SQUASH}<g transform="translate(-4 -8)">${drawn}</g></g></g></g>`
+		: `<g>${drawn}</g>`
 	const faded = look.pose === 'stopped' ? `<g opacity="0.45">${sprite}</g>` : sprite
 	return `<svg xmlns="${XMLNS}" viewBox="0 -1 8 9" width="${num(size)}" height="${num(pipHeight(size))}" shape-rendering="crispEdges">${faded}</svg>`
 }
