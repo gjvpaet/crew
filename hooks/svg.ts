@@ -120,10 +120,6 @@ const SHIMMER_SHARE = 0.3
 const SHIMMER_STEPS = 6
 
 // The band bar's track and fill, in pixels.
-function trackAndFill(fraction: number, width: number, height: number, color: string) {
-	return rect('track', 0, width, 0, height, TRACK) + rect('fill', 0, clamp(fraction, 0, 1) * width, 0, height, color)
-}
-
 // An agent's bar has no width of its own: drawn this wide and stretched (preserveAspectRatio none) to the column the
 // surface gives it, its lengths in percent. Stretching squeezes the round ends sideways, so a rule per 20px of drawn
 // width sets the horizontal radius back to what reads as height / 2 at that width.
@@ -184,19 +180,130 @@ export type BandBarSvgInput = {
 	pill: string
 	pillBg: string
 	pillFg: string
+	// How many steps the bar counts: a tick marks each boundary still ahead of the fill.
+	total: number
+	// Work is under way: a scanner sweeps the rest of the bar, from the fill's edge to the end.
+	isSweeping?: boolean
+	// The fraction before the latest change: the pill slides over from there, and the fill grows with it.
+	from?: number
 }
 
 const PILL_INSET = 2
+// A pixel every 3px, drawn 2.2px wide so the gaps between them read as a grid.
+const CELL = 3
+const DOT = 2.2
+const FILL_DENSITY = 0.78
+const FILL_OPACITIES = [0.55, 0.78, 1]
+const DUST = { density: 0.06, opacity: 0.18 }
+// Seconds: the beam crosses whatever is left of the bar in `travel`, rests, and starts again; each column fades
+// over `trail` once the beam has passed it.
+const BEAM = { density: 0.55, opacity: 0.85, travel: 1.8, rest: 0.6, rise: 0.04, trail: 0.35 }
+const TICK = { minGap: 8, inset: 4, fill: '#888780', opacity: 0.6 }
+const SLIDE = 'dur="0.7s" keyTimes="0;1" calcMode="spline" keySplines="0.2 0.8 0.3 1" fill="freeze"'
 
-export function bandBarSvg({ fraction, width, height, color, pill, pillBg, pillFg }: BandBarSvgInput): string {
+// The same cell always draws the same way, so the dither holds still between redraws.
+function cellHash(column: number, row: number, salt: number) {
+	let h = (column * 374761393 + row * 668265263 + salt * 982451653) >>> 0
+	h = Math.imul(h ^ (h >>> 13), 1274126177) >>> 0
+	return ((h ^ (h >>> 16)) >>> 0) / 4294967296
+}
+
+type Cell = { column: number; row: number; x: number; y: number }
+
+function gridCells(width: number, height: number): Cell[] {
+	const columns = Math.floor(width / CELL)
+	const rows = Math.floor(height / CELL)
+	const left = (width - columns * CELL) / 2 + (CELL - DOT) / 2
+	const top = (height - rows * CELL) / 2 + (CELL - DOT) / 2
+	const cells: Cell[] = []
+	for (let column = 0; column < columns; column++)
+		for (let row = 0; row < rows; row++) cells.push({ column, row, x: left + column * CELL, y: top + row * CELL })
+	return cells
+}
+
+const cellPath = (cells: readonly Cell[]) => cells.map(({ x, y }) => `M${num(x)} ${num(y)}h${DOT}v${DOT}h-${DOT}z`).join('')
+const centre = (cell: Cell) => cell.x + DOT / 2
+
+function pillLeft(fraction: number, width: number, pillWidth: number) {
+	return num(clamp(clamp(fraction, 0, 1) * width - pillWidth, PILL_INSET, width - PILL_INSET - pillWidth))
+}
+
+export function bandBarSvg(input: BandBarSvgInput): string {
+	const { width, height, color, pill, pillBg, pillFg, total, isSweeping = false, from } = input
+	const head = clamp(input.fraction, 0, 1) * width
+	const cells = gridCells(width, height)
+	const filled = cells.filter(cell => centre(cell) < head && cellHash(cell.column, cell.row, 1) < FILL_DENSITY)
+	const ahead = cells.filter(cell => centre(cell) >= head)
+
+	// The fill: a dither at three strengths. On a rise it is uncovered left to right in step with the pill.
+	const done = FILL_OPACITIES.map((opacity, level) => {
+		const mine = filled.filter(cell => Math.floor(cellHash(cell.column, cell.row, 2) * FILL_OPACITIES.length) === level)
+		return mine.length ? `<path class="done" d="${cellPath(mine)}" fill="${color}" fill-opacity="${opacity}"/>` : ''
+	}).join('')
+	const isRising = from !== undefined && clamp(from, 0, 1) * width < head
+	const reveal = isRising
+		? `<clipPath id="filled"><rect x="0" y="0" width="${num(head)}" height="${num(height)}">` +
+			`<animate attributeName="width" values="${num(clamp(from, 0, 1) * width)};${num(head)}" ${SLIDE}/></rect></clipPath>`
+		: ''
+	const fill = done && isRising ? `<g clip-path="url(#filled)">${done}</g>` : done
+
+	const dustCells = ahead.filter(cell => cellHash(cell.column, cell.row, 3) < DUST.density)
+	const dust = dustCells.length
+		? `<path class="dust" d="${cellPath(dustCells)}" fill="${color}" fill-opacity="${DUST.opacity}"/>`
+		: ''
+
+	// The scanner: one path per column past the fill, lit as the beam reaches it and faded behind it, every column
+	// on the same cycle, so the markup (and the sweep) carry on unchanged from one redraw to the next.
+	let sweep = ''
+	if (isSweeping && ahead.length) {
+		const cycle = BEAM.travel + BEAM.rest
+		const span = Math.max(1, width - head)
+		const columns = [...new Set(ahead.map(cell => cell.column))]
+		sweep = columns
+			.map(column => {
+				const lit = ahead.filter(cell => cell.column === column && cellHash(column, cell.row, 4) < BEAM.density)
+				const [first] = lit
+				if (!first) return ''
+				const at = ((centre(first) - head) / span) * BEAM.travel
+				const times = [0, at, at + BEAM.rise, at + BEAM.trail, cycle].map(time => num(time / cycle)).join(';')
+				return (
+					`<path class="beam" d="${cellPath(lit)}" fill="${color}" fill-opacity="${BEAM.opacity}" opacity="0">` +
+					`<animate attributeName="opacity" values="0;0;1;0;0" keyTimes="${times}" dur="${num(cycle)}s" ` +
+					`repeatCount="indefinite"/></path>`
+				)
+			})
+			.join('')
+	}
+
+	const gap = total > 0 ? width / total : 0
+	const ticks =
+		gap >= TICK.minGap
+			? Array.from({ length: total - 1 }, (_, index) => (index + 1) * gap)
+					.filter(x => x > head + 0.5)
+					.map(
+						x =>
+							`<rect class="tick" x="${num(x)}" y="${TICK.inset}" width="1" height="${num(height - 2 * TICK.inset)}" ` +
+							`fill="${TICK.fill}" fill-opacity="${TICK.opacity}"/>`
+					)
+					.join('')
+			: ''
+
+	// The pill rides the fill's edge, its right end on it, kept inside the bar at either end.
 	const fontSize = Math.max(8, Math.round(height * 0.58))
 	const pillHeight = height - 4
 	// No text metrics in a static image: estimate the width from an average glyph of a system sans.
 	const pillWidth = Math.min(width - 2 * PILL_INSET, pill.length * fontSize * 0.6 + pillHeight)
-	// The pill sits at the end away from the fill's edge, so it never hides how far the bar has come.
-	const x = clamp(fraction, 0, 1) < 0.5 ? width - PILL_INSET - pillWidth : PILL_INSET
+	const x = pillLeft(input.fraction, width, pillWidth)
+	const was = from === undefined ? x : pillLeft(from, width, pillWidth)
+	const slide =
+		was === x ? '' : `<animateTransform attributeName="transform" type="translate" values="${was} 0;${x} 0" ${SLIDE}/>`
 	const text =
-		`<text x="${num(x + pillWidth / 2)}" y="${num(height / 2)}" text-anchor="middle" dominant-baseline="central" ` +
+		`<text x="${num(pillWidth / 2)}" y="${num(height / 2)}" text-anchor="middle" dominant-baseline="central" ` +
 		`font-family="system-ui, sans-serif" font-size="${fontSize}" font-weight="600" fill="${pillFg}">${escapeXml(pill)}</text>`
-	return `${svgOpen(width, height)}${trackAndFill(fraction, width, height, color)}${rect('pill', x, pillWidth, 2, pillHeight, pillBg)}${text}</svg>`
+	const pillGroup =
+		`<g class="pill-at" transform="translate(${x} 0)">${slide}${rect('pill', 0, pillWidth, 2, pillHeight, pillBg)}${text}</g>`
+
+	const track = rect('track', 0, width, 0, height, TRACK)
+	const clip = `<clipPath id="track">${rect('clip', 0, width, 0, height, '#000')}</clipPath>${reveal}`
+	return `${svgOpen(width, height)}<defs>${clip}</defs>${track}<g clip-path="url(#track)">${fill}${dust}${sweep}</g>${ticks}${pillGroup}</svg>`
 }

@@ -4,7 +4,7 @@ import type { On } from 'claude-code'
 import type { MascotPrefs } from '../types'
 import { bandBarSvg, pipHeight, pipSvg, pipWidth } from './svg'
 import { PALETTE } from './sprite'
-import { EMPTY_STATE, MAIN, selectProgress, selectRunning } from './tracker'
+import { EMPTY_STATE, isPulsing, MAIN, selectProgress, selectRunning } from './tracker'
 import { bandLine } from './view'
 
 // The engine's scan follows state refs only through consts of the same file, so each file declares its own.
@@ -19,8 +19,19 @@ const FAILED = new Set(['failed', 'killed', 'stopped'])
 // The SVG bar's look on desktop, vscode and mobile: a violet fill (readable on the light track) and a purple pill.
 const BAR = { width: 200, height: 18, fill: '#7F77DD', pillBg: '#534AB7', pillFg: '#EEEDFE' }
 const MINI_PIP_PX = 16
+// A change of progress slides the pill over for this long, then the bar is drawn still again.
+const SLIDE_MS = 900
 // Desktop lines the band's items up on the text baseline, whatever the row's `alignItems`, and an image's
 // baseline is its bottom edge, so a bare Svg rides high. Each one sits in a Box that centres itself instead.
+
+// The fraction last drawn and where it came from, so a change slides the pill rather than jumping. Kept in the
+// module: a reload starts it over, which only skips one slide.
+let shown = { fraction: -1, from: 0, at: 0 }
+
+function slideFrom(fraction: number, now: number): number | undefined {
+	if (fraction !== shown.fraction) shown = { fraction, from: shown.fraction < 0 ? fraction : shown.fraction, at: now }
+	return now - shown.at < SLIDE_MS && shown.from !== fraction ? shown.from : undefined
+}
 
 // `onViewport` hears whether the surface docks a pane beside the transcript, each time the band is drawn where it said.
 export function registerBand(on: On, onViewport: (isFullscreen: boolean) => void) {
@@ -40,6 +51,8 @@ export function registerBand(on: On, onViewport: (isFullscreen: boolean) => void
 			const { Svg } = elements
 			const prefs = await read($, mascots)
 			const isAnyRunning = selectRunning(state) > 0
+			const isSweeping = isPulsing(state)
+			const from = slideFrom(progress.fraction, await $.clock.now())
 			const main = state.agents[MAIN]
 			// With no sub-agent, Main is the one at work: its own Pip, moving while its turn runs.
 			const mainPose = main?.status === 'running' ? 'running' : FAILED.has(main?.status ?? 'completed') ? 'stopped' : 'still'
@@ -69,11 +82,16 @@ export function registerBand(on: On, onViewport: (isFullscreen: boolean) => void
 								color: BAR.fill,
 								pill: line.pill,
 								pillBg: BAR.pillBg,
-								pillFg: BAR.pillFg
+								pillFg: BAR.pillFg,
+								total: progress.total,
+								isSweeping,
+								...(from === undefined ? {} : { from })
 							})}
 							alt={`${line.pill}, ${line.percent}`}
 							width={BAR.width}
 							height={BAR.height}
+							// A live frame while the scanner runs or the pill slides; otherwise a still image.
+							isInteractive={isSweeping || from !== undefined}
 						/>
 					</Box>
 					<Text tabular>{line.percent}</Text>
