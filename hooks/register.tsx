@@ -1,17 +1,20 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { AgentStatusView, MascotPrefs } from '../types'
 import { registerBand } from './band'
-import { SET_MASCOT_SPEC, SET_MASCOT_TOOL, applyMascotChange, parseMascotInput } from './mascot'
+import { SET_MASCOT_SPEC, SET_MASCOT_TOOL, applyMascotChange, parseMascotInput, sanitizeMascots } from './mascot'
 import { PANE, registerPanel } from './panel'
 import { TASK_TOOLS } from './tasks'
-import { EMPTY_STATE, reduce, type CrewEvent } from './tracker'
+import { EMPTY_STATE, isTicking, reduce, type CrewEvent } from './tracker'
 
 // The engine's scan follows state refs only through consts of the same file, so each file declares its own.
 const model = atom({ plugin: 'crew', key: 'model' } as const, EMPTY_STATE)
 const isBandHidden = atom({ plugin: 'crew', key: 'isBandHidden' } as const, false)
 const mascots = atom({ plugin: 'crew', key: 'mascots' } as const, {} as MascotPrefs)
+const hasAutoOpened = atom({ plugin: 'crew', key: 'hasAutoOpened' } as const, false)
+
+const TICK_MS = 1000
 
 const RESERVED = new Set(['tool', 'tool_use_id', 'consent', 'agentId', 'requestMeta'])
 
@@ -22,14 +25,41 @@ async function apply($: EngineInterface, ev: CrewEvent) {
 	await update($, model, state => reduce(state, ev))
 }
 
+// The store is the source of truth across sessions and /clear; what it holds is sanitised before it is drawn.
+async function loadMascots($: EngineInterface) {
+	const saved = sanitizeMascots(await $.store.get('mascots'))
+	const same = (prefs: MascotPrefs) => JSON.stringify(prefs) === JSON.stringify(saved)
+	if (!same(await read($, mascots))) await update($, mascots, prefs => (same(prefs) ? prefs : saved))
+}
+
+// Redraw the pane and band once a second while a clock on them is counting.
+async function tick($: EngineInterface) {
+	if (isTicking(await read($, model))) $.ui.invalidate('ui.render')
+}
+
+// The first spawn of a session opens the pane only where it would be a sidebar; elsewhere it says how to open it.
+async function introducePane($: EngineInterface, isSidebar: boolean | undefined) {
+	let isFirst = false
+	await update($, hasAutoOpened, wasOpened => {
+		isFirst = !wasOpened
+		return true
+	})
+	if (!isFirst) return
+	if (isSidebar === true) void $.ui.open({ id: PANE, title: 'Agents' })
+	else $.ui.toast('Crew: /crew opens the Agents panel')
+}
+
 export const register: Register = on => {
-	let hasOpenedPane = false
+	// Last seen from the band's drawing: the spawn hook has no viewport of its own.
+	let isSidebar: boolean | undefined
+	let ticker: Timer | undefined
 
 	on('session.start', async ($, e, next) => {
 		await $.command.register({ name: 'crew', description: 'Open the Crew agents panel' })
 		await $.tool.register(SET_MASCOT_SPEC)
-		const saved = await $.store.get('mascots')
-		if (saved && typeof saved === 'object') await update($, mascots, () => saved as MascotPrefs)
+		await loadMascots($)
+		ticker?.cancel()
+		ticker = $.clock.every(TICK_MS, () => void tick($).catch(() => undefined))
 		return next(e)
 	})
 
@@ -40,6 +70,7 @@ export const register: Register = on => {
 
 	on('turn.start', async ($, e, next) => {
 		await apply($, { kind: 'turnStart', at: await $.clock.now(), turnId: e.turnId, text: e.text, agentId: e.agentId })
+		if (!e.agentId) await loadMascots($)
 		if (!e.agentId && e.text !== '') await update($, isBandHidden, () => false)
 		return next(e)
 	})
@@ -53,37 +84,44 @@ export const register: Register = on => {
 				agentId: started.agentId,
 				description: e.description,
 				subagentType: e.subagentType,
-				model: started.model
+				model: started.model,
+				...(e.parentAgentId ? { parentId: e.parentAgentId } : {})
 			})
-			if (!hasOpenedPane) {
-				hasOpenedPane = true
-				void $.ui.open({ id: PANE, title: 'Agents' })
-			}
+			await introducePane($, isSidebar)
 		}
 		return started
 	}).catch(($, e, next) => next(e)) // a Crew failure never fails a spawn
 
 	on('turn.step', async function* ($, e, next) {
 		const result = yield* next(e)
-		await apply($, {
-			kind: 'step',
-			at: await $.clock.now(),
-			agentId: e.agentId,
-			model: e.model,
-			effort: e.effort === undefined ? undefined : String(e.effort),
-			usage: result.usage
-		})
-		if ((await read($, model)).order.length > 0) {
-			const list = await $.agent.list()
-			await apply($, {
+		try {
+			const at = await $.clock.now()
+			const step: CrewEvent = {
+				kind: 'step',
+				at,
+				agentId: e.agentId,
+				model: e.model,
+				effort: e.effort === undefined ? undefined : String(e.effort),
+				usage: result.usage
+			}
+			const hasAgents = e.agentId !== undefined || (await read($, model)).order.length > 0
+			const list = hasAgents ? await $.agent.list() : null
+			const statuses: CrewEvent | null = list && {
 				kind: 'statuses',
-				at: await $.clock.now(),
+				at,
 				list: list.map(agent => ({
 					id: agent.id,
 					status: agent.status as AgentStatusView,
 					...(agent.parentId ? { parentId: agent.parentId } : {})
 				}))
+			}
+			// One write per step: the usage and the statuses land together.
+			await update($, model, state => {
+				const stepped = reduce(state, step)
+				return statuses ? reduce(stepped, statuses) : stepped
 			})
+		} catch {
+			// Crew's bookkeeping never fails a step.
 		}
 		return result
 	})
@@ -110,6 +148,8 @@ export const register: Register = on => {
 		return ran
 	}).catch(($, e, next) => next(e)) // a Crew failure never fails a tool call
 
-	registerBand(on)
+	registerBand(on, isFullscreen => {
+		isSidebar = isFullscreen
+	})
 	registerPanel(on)
 }

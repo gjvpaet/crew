@@ -10,8 +10,10 @@ const isBandHidden = atom({ plugin: 'crew', key: 'isBandHidden' } as const, fals
 
 const DOT = { running: 'claude', done: 'success', aborted: 'error' } as const
 
-export function registerBand(on: On) {
+// `onViewport` hears whether the surface docks a pane beside the transcript, each time the band is drawn where it said.
+export function registerBand(on: On, onViewport: (isFullscreen: boolean) => void) {
 	on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+		if (e.viewport?.isFullscreen !== undefined) onViewport(e.viewport.isFullscreen)
 		const state = await read($, model)
 		const progress = selectProgress(state)
 		if (e.props.hasSurvey || !progress || (await read($, isBandHidden))) return next(e)
@@ -22,10 +24,16 @@ export function registerBand(on: On) {
 		return (
 			<Box flexDirection="row">
 				<Text color={DOT[line.tone]}>● </Text>
-				<Text weight="semibold">{line.label} </Text>
-				<Text color="claude">{line.filled}</Text>
-				<Text dimColor>{line.empty}</Text>
-				<Text tabular>
+				<Text weight="semibold" wrap="truncate-end">
+					{line.label}{' '}
+				</Text>
+				<Text color="claude" mono>
+					{line.filled}
+				</Text>
+				<Text dimColor mono>
+					{line.empty}
+				</Text>
+				<Text tabular wrap="truncate-end">
 					{' '}
 					{line.pill} {line.percent}{' '}
 				</Text>

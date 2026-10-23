@@ -44,9 +44,11 @@ export function registerPanel(on: On) {
 			<Box key={`row-${row.id}`} flexDirection="row" gap={1} marginBottom={1}>
 				<Box flexDirection="column">
 					{row.sprite.map(cells => (
-						<Text>
+						<Text mono>
 							{cells.map(cell => (
-								<Text {...cellProps(cell)}>{cell.ch}</Text>
+								<Text mono {...cellProps(cell)}>
+									{cell.ch}
+								</Text>
 							))}
 						</Text>
 					))}
@@ -66,7 +68,9 @@ export function registerPanel(on: On) {
 							{row.stats}
 						</Text>
 					</Text>
-					<Text color={TONE[row.tone]}>{row.bar}</Text>
+					<Text color={TONE[row.tone]} mono>
+						{row.bar}
+					</Text>
 				</Box>
 			</Box>
 		)

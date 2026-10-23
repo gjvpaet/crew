@@ -66,6 +66,7 @@ declare module 'claude-code' {
 			isBandHidden: boolean
 			isFinishedOpen: boolean
 			mascots: MascotPrefs
+			hasAutoOpened: boolean
 		}
 	}
 }
