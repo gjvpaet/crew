@@ -17,6 +17,9 @@ const groupOpen = atom({ plugin: 'crew', key: 'groupOpen' } as const, {} as Reco
 
 const TICK_MS = 1000
 
+// Origins where a person typed the prompt; every other origin (agents, notifications, triggers) continues a turn.
+const PERSON_ORIGINS = new Set(['composer', 'bridge', 'sdk'])
+
 const RESERVED = new Set(['tool', 'tool_use_id', 'consent', 'agentId', 'requestMeta'])
 
 const toolInput = (e: object): Record<string, unknown> =>
@@ -60,6 +63,18 @@ export const register: Register = on => {
 	// Last seen from the band's drawing: the spawn hook has no viewport of its own.
 	let isSidebar: boolean | undefined
 	let ticker: Timer | undefined
+	// The prompt whose main turn has not started yet, and whether a person typed it; null when none was seen,
+	// in which case the turn falls back to the tracker's text rule.
+	let submitted: { text: string; isPerson: boolean } | null = null
+
+	// Noted before `next`: the prompt's turn can start before `next` resolves.
+	on('prompt.submit', async ($, e, next) => {
+		const mine = { text: e.text, isPerson: !e.command && !e.isMeta && PERSON_ORIGINS.has(e.origin.kind) }
+		submitted = mine
+		const entered = await next(e)
+		if (entered.drop !== undefined && submitted === mine) submitted = null
+		return entered
+	}).catch(($, e, next) => next(e))
 
 	on('session.start', async ($, e, next) => {
 		await $.command.register({ name: 'crew', description: 'Open the Crew agents panel' })
@@ -76,9 +91,20 @@ export const register: Register = on => {
 	})
 
 	on('turn.start', async ($, e, next) => {
-		await apply($, { kind: 'turnStart', at: await $.clock.now(), turnId: e.turnId, text: e.text, agentId: e.agentId })
+		const seen = e.agentId ? null : submitted
+		if (!e.agentId) submitted = null
+		const isPerson = seen?.isPerson
+		const text = isPerson ? (seen as { text: string }).text : e.text
+		await apply($, {
+			kind: 'turnStart',
+			at: await $.clock.now(),
+			turnId: e.turnId,
+			text,
+			agentId: e.agentId,
+			...(isPerson === undefined ? {} : { isPerson })
+		})
 		if (!e.agentId) await loadMascots($)
-		if (!e.agentId && e.text !== '') {
+		if (!e.agentId && isPerson !== false && text !== '') {
 			await update($, isBandHidden, () => false)
 			await dropFinishedFold($)
 		}

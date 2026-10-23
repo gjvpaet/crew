@@ -30,7 +30,8 @@ export type ApiUsage = {
 export type ListedAgent = { id: string; status: AgentStatusView; parentId?: string }
 
 export type CrewEvent =
-	| { kind: 'turnStart'; at: number; turnId: string; text: string; agentId?: string }
+	// `isPerson` false: the turn was started by an agent message, a notification or a trigger, not by someone typing.
+	| { kind: 'turnStart'; at: number; turnId: string; text: string; agentId?: string; isPerson?: boolean }
 	| { kind: 'spawn'; at: number; agentId: string; description: string; subagentType: string; model?: string; parentId?: string }
 	| { kind: 'step'; at: number; agentId?: string; model: string; effort?: string; usage: ApiUsage | null }
 	| { kind: 'turnEnd'; at: number; agentId?: string; isAborted: boolean; reason: string }
@@ -55,6 +56,12 @@ const addUsage = (sum: Usage, usage: ApiUsage): Usage => ({
 })
 
 const firstLine = (text: string) => (text.split('\n').find(line => line.trim()) ?? '').trim().slice(0, 80)
+
+// A raw message envelope (`<agent-message …>`, `<task-notification>`) is never a title.
+function labelOf(ev: Extract<CrewEvent, { kind: 'turnStart' }>): string {
+	const line = firstLine(ev.text)
+	return ev.isPerson === false || line.startsWith('<') ? 'Working' : line
+}
 
 function newAgent(id: string, at: number, fields: Partial<AgentRecord> = {}): AgentRecord {
 	return {
@@ -123,7 +130,8 @@ function startTurn(state: CrewState, ev: Extract<CrewEvent, { kind: 'turnStart' 
 		const { endedAt: _ended, ...rest } = agent
 		return { ...withAgent(state, { ...rest, status: 'running' }), order: withOrder(state, ev.agentId), nextColor, known }
 	}
-	if (ev.text === '' && state.turn) {
+	// An empty prompt, or one no person typed, carries on the turn the person started.
+	if (state.turn && (ev.text === '' || ev.isPerson === false)) {
 		const { endedAt: _turnEnded, ...turn } = state.turn
 		const { endedAt: _mainEnded, ...main } = state.agents[MAIN] ?? newAgent(MAIN, ev.at)
 		return { ...withAgent(state, { ...main, status: 'running' }), turn: { ...turn, isAborted: false } }
@@ -138,7 +146,7 @@ function startTurn(state: CrewState, ev: Extract<CrewEvent, { kind: 'turnStart' 
 	const isListDone = state.tasks.every(task => task.status === 'completed')
 	return {
 		...state,
-		turn: { id: ev.turnId, label: firstLine(ev.text), startedAt: ev.at, isAborted: false },
+		turn: { id: ev.turnId, label: labelOf(ev), startedAt: ev.at, isAborted: false },
 		agents: { ...carried, [MAIN]: main },
 		order: state.order.filter(id => id in carried),
 		tasks: isListDone ? [] : state.tasks,

@@ -40,7 +40,7 @@ Every gap between segments comes from the row's `gap`, never from spaces inside 
 That is the terminal. On desktop, vscode and mobile the bar is one 200×18 px SVG with the pill (`Tasks 3/5`) drawn inside it (purple pill, violet `#7F77DD` fill). The pill sits at the end away from the fill's edge (right while under half done, left from half on), so it never hides the progress, and a 16 px developer Pip sits before `N running`.
 
 - **Shown when** a turn is running and either at least one sub-agent exists or a task list has been seen. A turn with neither shows no band.
-- **Label:** the first line of the user's prompt, shortened (task lists have no title in the tool data, so it is always the prompt).
+- **Label:** the first line of the prompt the person typed, shortened (task lists have no title in the tool data, so it is always the prompt). A turn started by an agent message, a task notification, another session or a trigger keeps the person's label; a raw `<…>` envelope is never shown, and a turn with no person prompt reads `Working`.
 - **Count (Hybrid source):**
   - When task-list tool calls are visible: `Tasks done/total`.
   - Otherwise: `Agents finished/spawned`.
@@ -115,7 +115,7 @@ The `$.state` contract (state types, `PluginState`) lives in `types/index.d.ts`:
 
 Tracker behaviours worth knowing:
 
-- An empty-text main `turn.start` is a continuation: it reopens the turn and Main instead of starting a new turn.
+- An empty-text main `turn.start` is a continuation: it reopens the turn and Main instead of starting a new turn. So is any main turn whose `prompt.submit` origin is not a person (`composer`, `bridge` or `sdk`): an agent hand-back, a task notification, a peer message or a trigger keeps the label, the timer, the turn totals and the agents. `prompt.submit` is noted before `next`, since the turn can start before `next` resolves; with no `prompt.submit` seen, the text rule above applies.
 - Agent identity (`known`) survives prompts, so a resumed agent keeps its name and role.
 - An abort stops only `running` and `pending` agents.
 - A step that carries usage revives a stopped agent.

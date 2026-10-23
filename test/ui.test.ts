@@ -412,3 +412,36 @@ test('mascot prefs load from the store at the start of each main turn, sanitised
 	const researcher = await $.tool.call({ tool: 'mcp__crew__set_mascot', role: 'researcher', body: '#112233' } as any)
 	expect(researcher.result).toEqual({ ok: true, role: 'researcher', prefs: { body: '#112233' } })
 })
+
+test('a turn an agent message starts keeps the person prompt as the band title', async ($, on) => {
+	mock.clock(on, { now: 1000 })
+	mock.store(on)
+	on('command.register', () => ({ value: { command: 'crew' } }))
+	on('tool.register', () => ({ value: { tool: 'mcp__crew__set_mascot' } }))
+	on('ui.open', () => ({ value: { isPlaced: true } }))
+	on('ui.toast', () => ({ value: undefined }))
+	on('session.start', (_: unknown, e: any) => ({ cwd: e.cwd }))
+	on('prompt.submit', (_: unknown, e: any) => ({ text: e.text }))
+	on('turn.start', (_: unknown, e: any) => ({ turnId: e.turnId }))
+	on('turn.complete', () => ({ text: '' }))
+	on('agent.spawn', () => ({ model: 'claude-opus-5-5', agentId: 'a1' }))
+	on('ui.render', (_$: any, e: any) => {
+		const { Box } = _$.ui.resolve(e)
+		return h(Box, null)
+	})
+
+	await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+	await $.prompt.submit({ text: 'Build the launch kit', origin: { kind: 'composer' }, wait: false })
+	await $.turn.start({ text: 'Build the launch kit', turnId: 't1' })
+	await $.agent.spawn({ prompt: 'go', description: 'Research competitor launches', subagentType: 'Explore' })
+	await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+	await $.prompt.submit({ text: '<agent-message from="a1">done</agent-message>', origin: { kind: 'peer' }, wait: false })
+	await $.turn.start({ text: '<agent-message from="a1">done</agent-message>', turnId: 't2' })
+
+	for (const surface of ['terminal', 'desktop'] as const) {
+		const ui = await $.ui.mount({ ...BAND, surface })
+		expect(await ui.find({ type: 'Text', text: /Build the launch kit/ })).toBeDefined()
+		expect(await ui.find({ type: 'Text', text: /agent-message/ })).toBeUndefined()
+		await ui.unmount()
+	}
+})

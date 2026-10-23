@@ -308,3 +308,45 @@ test('time moves while a turn is open or an agent runs', async () => {
 	)
 	expect(isTicking(allDone)).toBe(false)
 })
+
+test('a turn no person started continues the current one', async () => {
+	const ended = run([
+		...START,
+		{ kind: 'step', at: 3000, model: 'claude-opus-5-5', usage: usage(1000, 0, 0, 0) },
+		{ kind: 'turnEnd', at: 20_000, isAborted: false, reason: 'answer' }
+	])
+	const next = reduce(ended, {
+		kind: 'turnStart',
+		at: 25_000,
+		turnId: 't2',
+		text: '<agent-message from="a670999281b9">done</agent-message>',
+		isPerson: false
+	})
+	expect(next.turn?.id).toBe('t1')
+	expect(next.turn?.label).toBe('Build the launch kit')
+	expect(next.turn?.startedAt).toBe(1000)
+	expect(next.turn?.endedAt).toBeUndefined()
+	expect(next.agents[MAIN].status).toBe('running')
+	expect(next.order).toEqual(['a1', 'a2', 'a3'])
+	expect(selectTurnTotals(next).tokens).toBe(1000)
+})
+
+test('a person prompt still starts a fresh turn', async () => {
+	const ended = run([...START, { kind: 'turnEnd', at: 20_000, isAborted: false, reason: 'answer' }])
+	const next = reduce(ended, { kind: 'turnStart', at: 25_000, turnId: 't2', text: 'Next thing', isPerson: true })
+	expect(next.turn?.id).toBe('t2')
+	expect(next.turn?.label).toBe('Next thing')
+})
+
+test('a label never shows a raw message envelope', async () => {
+	const fromAgent = reduce(EMPTY_STATE, {
+		kind: 'turnStart',
+		at: 1000,
+		turnId: 't1',
+		text: '<task-notification>\n<task-id>x</task-id>',
+		isPerson: false
+	})
+	expect(fromAgent.turn?.label).toBe('Working')
+	const unmarked = reduce(EMPTY_STATE, { kind: 'turnStart', at: 1000, turnId: 't1', text: '<agent-message from="a6">hi' })
+	expect(unmarked.turn?.label).toBe('Working')
+})
