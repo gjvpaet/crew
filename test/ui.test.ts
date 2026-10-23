@@ -84,7 +84,7 @@ test('on desktop the band draws its bar, pill and a mini Pip as SVG', async ($, 
 	expect(String(bar?.props.source)).not.toContain('#AFA9EC')
 	const [pip] = await svgs(ui, /mascot/)
 	expect(String(pip?.props.source)).toContain('shape-rendering="crispEdges"')
-	expect(pip?.props.width).toBe(16)
+	expect(pip?.props.width).toBe(20)
 	// Sub-agents are running, so the band's Pip moves too.
 	expect(pip?.props.isInteractive).toBe(true)
 	expect(String(pip?.props.source)).toContain('<animateTransform')
@@ -129,7 +129,7 @@ test('on desktop every agent card draws Pip and its bar as SVG', async ($, on) =
 	const pips = await svgs(ui, /mascot/)
 	expect(pips).toHaveLength(3)
 	expect(pips.every(pip => String(pip.props.source).includes('shape-rendering="crispEdges"'))).toBe(true)
-	expect(pips.every(pip => pip.props.width === 32 && pip.props.height === 36)).toBe(true)
+	expect(pips.every(pip => pip.props.width === 40 && pip.props.height === 44)).toBe(true)
 	// All three are at work: each Pip is drawn live, so it can bob and blink.
 	expect(pips.every(pip => pip.props.isInteractive === true)).toBe(true)
 	expect(pips.every(pip => String(pip.props.source).includes('<animateTransform'))).toBe(true)
@@ -177,6 +177,10 @@ test('Main shows it is waiting while a sub-agent still runs', async ($, on) => {
 	await $.turn.complete({ turnId: 't1', answer: 'x', durationMs: 1, isAborted: false, reason: 'answer' } as any)
 	const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
 	expect((await ui.find({ type: 'Text', text: /waiting on/ }))?.text).toBe('waiting on 2 agents')
+	// Main is inactive while it waits: its Pip is drawn live so its zzz can play.
+	const [main] = await svgs(ui, /^Pip the .* mascot, paused$/)
+	expect(main?.props.isInteractive).toBe(true)
+	expect(String(main?.props.source)).toContain('class="z"')
 	await ui.unmount()
 })
 
@@ -217,7 +221,7 @@ test('set_mascot redraws that role\'s Pip on desktop', async ($, on) => {
 	await startTwoAgents($, on)
 	const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
 	const [before] = await svgs(ui, / the developer mascot, /)
-	expect(before?.props.width).toBe(32)
+	expect(before?.props.width).toBe(40)
 	expect(String(before?.props.source)).not.toContain('#112233')
 	await $.tool.call({ tool: 'mcp__crew__set_mascot', role: 'developer', body: '#112233' } as any)
 	const [after] = await svgs(ui, / the developer mascot, /)

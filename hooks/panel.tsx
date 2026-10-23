@@ -4,7 +4,7 @@ import type { EngineInterface, On } from 'claude-code'
 import type { MascotPrefs } from '../types'
 import { clamp } from './format'
 import type { Species, SpriteCell } from './sprite'
-import { barSvg, pipHeight, pipSvg } from './svg'
+import { barSvg, pipHeight, pipSvg, pipWidth } from './svg'
 import { EMPTY_STATE } from './tracker'
 import { panelView, toggleGroup, type RowView, type Tone } from './view'
 
@@ -70,10 +70,10 @@ export function registerPanel(on: On) {
 				<Svg
 					source={pipSvg(row.role, prefs, PIP_PX, { species: row.species, body: row.accent, pose: row.pose })}
 					alt={`${SPECIES_NAMES[row.species]} the ${row.role} mascot, ${row.pose}`}
-					width={PIP_PX}
+					width={pipWidth(PIP_PX)}
 					height={pipHeight(PIP_PX)}
-					// A live frame only while it runs, so it can bob and blink; every other pose is a still image.
-					isInteractive={row.pose === 'running'}
+					// A live frame while it runs (it hops) or sleeps (its zzz rises); every other pose is a still image.
+					isInteractive={row.pose === 'running' || row.pose === 'paused'}
 				/>
 			) : (
 				<Box flexDirection="column">

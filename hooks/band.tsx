@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { On } from 'claude-code'
 
 import type { MascotPrefs } from '../types'
-import { bandBarSvg, pipHeight, pipSvg } from './svg'
+import { bandBarSvg, pipHeight, pipSvg, pipWidth } from './svg'
 import { PALETTE } from './sprite'
 import { EMPTY_STATE, MAIN, selectProgress, selectRunning } from './tracker'
 import { bandLine } from './view'
@@ -81,7 +81,7 @@ export function registerBand(on: On, onViewport: (isFullscreen: boolean) => void
 						<Svg
 							source={mini.source}
 							alt={mini.alt}
-							width={MINI_PIP_PX}
+							width={pipWidth(MINI_PIP_PX)}
 							height={pipHeight(MINI_PIP_PX)}
 							// It moves while whoever it stands for is at work, and rests once they are not.
 							isInteractive={mini.isMoving}

@@ -21,8 +21,11 @@ function rect(name: string, x: number, width: number, y: number, height: number,
 	return `<rect class="${name}" x="${num(x)}" y="${num(y)}" width="${num(width)}" height="${num(height)}" rx="${num(height / 2)}" fill="${fill}"${extra}/>`
 }
 
-// A row of headroom above the 8×8 sprite, so a bob never clips a hat: the drawing is 9 pixels tall for 8 wide.
-export const pipHeight = (size: number) => Math.round((size * 9) / 8)
+// The 8×8 sprite with a pixel of room either side and two rows above it, 10 wide by 11 tall: a hop never clips a
+// hat, and a sleeper's z's rise clear of its head. `size` is the sprite's own width, so it is drawn as large as ever.
+const VIEW = { x: -1, y: -2, width: 10, height: 11 }
+export const pipWidth = (size: number) => Math.round((size * VIEW.width) / 8)
+export const pipHeight = (size: number) => Math.round((size * VIEW.height) / 8)
 
 // The panel redraws every second; a Pip only changes with its role, its prefs, its size or its look. Keeping the
 // markup identical between redraws also keeps a running Pip's animation where it is.
@@ -55,6 +58,35 @@ const SQUASH =
 	`keyTimes="0;0.1;0.3;0.7;0.8;1" dur="${BEAT}" repeatCount="indefinite"/>`
 const BLINK = '<animate attributeName="opacity" values="1;1;0;1" keyTimes="0;0.92;0.96;1" dur="3s" repeatCount="indefinite"/>'
 
+// Paused: asleep. Three pixel z's, each a size larger, rise from the top of the head up and to the right in turn,
+// fading in and out, a third of a cycle apart. A mid blue-grey that reads on light and dark backgrounds alike.
+const Z_GLYPH = ['####', '..#.', '.#..', '####']
+const Z_FILL = '#7D8AAD'
+const Z_CYCLE = 2.4
+const Z_SIZES = [0.26, 0.34, 0.42]
+const Z_FROM = { x: 6.2, y: 1 }
+const Z_FLOAT = '1 -3'
+
+function sleepSvg(): string {
+	return Z_SIZES.map((size, index) => {
+		const begin = `${num((index * Z_CYCLE) / Z_SIZES.length)}s`
+		const repeat = `dur="${Z_CYCLE}s" begin="${begin}" repeatCount="indefinite"`
+		const pixels = Z_GLYPH.flatMap((row, y) =>
+			[...row].map((ch, x) =>
+				ch === '#'
+					? `<rect x="${num(Z_FROM.x + x * size)}" y="${num(Z_FROM.y + y * size)}" width="${size}" height="${size}" fill="${Z_FILL}"/>`
+					: ''
+			)
+		).join('')
+		return (
+			`<g class="z" opacity="0">` +
+			`<animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.2;0.7;1" ${repeat}/>` +
+			`<animateTransform attributeName="transform" type="translate" values="0 0;${Z_FLOAT}" ${repeat}/>` +
+			`${pixels}</g>`
+		)
+	}).join('')
+}
+
 function drawPip(role: Role, prefs: MascotPrefs, size: number, look: Look): string {
 	let body = ''
 	let eyes = ''
@@ -76,8 +108,9 @@ function drawPip(role: Role, prefs: MascotPrefs, size: number, look: Look): stri
 	const sprite = isRunning
 		? `<g>${HOP}<g transform="translate(4 8)"><g>${SQUASH}<g transform="translate(-4 -8)">${drawn}</g></g></g></g>`
 		: `<g>${drawn}</g>`
-	const faded = look.pose === 'stopped' ? `<g opacity="0.45">${sprite}</g>` : sprite
-	return `<svg xmlns="${XMLNS}" viewBox="0 -1 8 9" width="${num(size)}" height="${num(pipHeight(size))}" shape-rendering="crispEdges">${faded}</svg>`
+	const faded =
+		look.pose === 'stopped' ? `<g opacity="0.45">${sprite}</g>` : look.pose === 'paused' ? sprite + sleepSvg() : sprite
+	return `<svg xmlns="${XMLNS}" viewBox="${VIEW.x} ${VIEW.y} ${VIEW.width} ${VIEW.height}" width="${num(pipWidth(size))}" height="${num(pipHeight(size))}" shape-rendering="crispEdges">${faded}</svg>`
 }
 
 export type BarSvgInput = { fraction: number; width: number; height: number; color: string; now?: number; isShimmer?: boolean }

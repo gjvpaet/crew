@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import { PALETTE, spriteCells, spriteGrid, spritePixels } from '../hooks/sprite'
-import { bandBarSvg, barSvg, escapeXml, pipHeight, pipSvg } from '../hooks/svg'
+import { bandBarSvg, barSvg, escapeXml, pipHeight, pipSvg, pipWidth } from '../hooks/svg'
 
 const rects = (svg: string) => svg.match(/<rect\b[^>]*>/g) ?? []
 const part = (svg: string, name: string) => rects(svg).find(rect => rect.includes(`class="${name}"`))
@@ -33,11 +33,13 @@ test('spritePixels lists every non-empty pixel with its colour', async () => {
 test('pipSvg draws one crisp rect per pixel', async () => {
 	const svg = pipSvg('researcher', {}, 32)
 	expect(isWellFormed(svg)).toBe(true)
-	// A row of headroom above the sprite, so a bob never clips a hat.
-	expect(svg).toContain('viewBox="0 -1 8 9"')
-	expect(svg).toContain('width="32"')
-	expect(svg).toContain('height="36"')
-	expect(pipHeight(32)).toBe(36)
+	// A pixel of room either side and two rows above the 8x8 sprite: a hop never clips a hat, and a sleeper's z's
+	// rise clear of its head. `size` stays the sprite's own width, so the sprite is drawn as large as ever.
+	expect(svg).toContain('viewBox="-1 -2 10 11"')
+	expect(svg).toContain('width="40"')
+	expect(svg).toContain('height="44"')
+	expect(pipWidth(32)).toBe(40)
+	expect(pipHeight(32)).toBe(44)
 	expect(svg).toContain('shape-rendering="crispEdges"')
 	// One rect per pixel, plus the body under each eye.
 	const pixels = spritePixels('researcher', {})
@@ -150,9 +152,13 @@ test('only a running Pip moves: it bobs and blinks', async () => {
 	expect(running).toContain('<animateTransform')
 	expect(running).toContain('attributeName="opacity"')
 	expect(running).toContain('repeatCount="indefinite"')
-	for (const pose of ['still', 'paused', 'stopped'] as const) {
+	for (const pose of ['still', 'stopped'] as const) {
 		expect(pipSvg('plain', {}, 32, { ...look, pose })).not.toContain('<animate')
 	}
+	// A paused one holds its body still: only its zzz moves.
+	const paused = pipSvg('plain', {}, 32, { ...look, pose: 'paused' })
+	expect(paused).not.toContain('type="scale"')
+	expect(paused).not.toContain('values="0 0;0 -1;0 0;0 0"')
 	expect(pipSvg('plain', {}, 32, { ...look, pose: 'stopped' })).toContain('opacity="0.45"')
 	// Each look is drawn once and its markup held: the same look gives the same string.
 	expect(pipSvg('plain', {}, 32, { ...look, pose: 'running' })).toBe(running)
@@ -180,4 +186,41 @@ test('a running Pip hops a whole pixel and squashes on landing, inside its headr
 	const durations = [...running.matchAll(/type="(?:translate|scale)"[^>]*dur="([^"]*)"/g)].map(match => match[1])
 	expect(durations).toHaveLength(2)
 	expect(new Set(durations).size).toBe(1)
+})
+
+test('a paused Pip sleeps: three z\'s rise from its head in turn and fade', async () => {
+	const svg = pipSvg('plain', {}, 32, { species: 'mochi', body: '#7F77DD', pose: 'paused' })
+	expect(isWellFormed(svg)).toBe(true)
+	const zs = svg.match(/<g class="z"[^>]*>[\s\S]*?<\/g>/g) ?? []
+	expect(zs).toHaveLength(3)
+	for (const z of zs) {
+		// Hidden until its turn comes, then it floats up and to the right while it fades in and out.
+		expect(z).toContain('opacity="0"')
+		expect(z).toMatch(/<animate attributeName="opacity"[^>]*repeatCount="indefinite"/)
+		expect(z).toMatch(/<animateTransform attributeName="transform" type="translate"[^>]*repeatCount="indefinite"/)
+		// Pixel z's, like the sprite: crisp rects, no font.
+		expect(z).toContain('<rect')
+		expect(z).not.toContain('<text')
+	}
+	const begins = zs.map(z => /begin="([^"]*)"/.exec(z)?.[1])
+	expect(new Set(begins).size).toBe(3)
+	// Each z is a size larger than the one before, as a sleeper's z's are drawn.
+	const sizes = zs.map(z => Number(/<rect [^>]*width="([^"]*)"/.exec(z)?.[1]))
+	expect(sizes[0]).toBeLessThan(sizes[1])
+	expect(sizes[1]).toBeLessThan(sizes[2])
+	// Every z stays inside the drawing for its whole rise: its rects, moved by the far end of its float.
+	for (const z of zs) {
+		const [dx, dy] = (/type="translate" values="0 0;([^"]*)"/.exec(z)?.[1] ?? '0 0').split(' ').map(Number)
+		for (const rect of z.match(/<rect [^>]*>/g) ?? []) {
+			const at = (name: string) => Number(new RegExp(`\\s${name}="([^"]*)"`).exec(rect)?.[1])
+			expect(at('x') + at('width') + Math.max(0, dx)).toBeLessThanOrEqual(9)
+			expect(at('y') + Math.min(0, dy)).toBeGreaterThanOrEqual(-2)
+		}
+	}
+	// A real Z, diagonal and all, big enough to read at the panel's size: the largest at least 6px tall at 32px.
+	expect(sizes[2] * 4).toBeGreaterThanOrEqual(1.5)
+	// Still, finished, stopped and running mascots are not asleep.
+	for (const pose of ['still', 'stopped', 'running'] as const) {
+		expect(pipSvg('plain', {}, 32, { species: 'mochi', body: '#7F77DD', pose })).not.toContain('class="z"')
+	}
 })
