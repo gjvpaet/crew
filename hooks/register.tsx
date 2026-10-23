@@ -6,7 +6,7 @@ import { registerBand } from './band'
 import { SET_MASCOT_SPEC, SET_MASCOT_TOOL, applyMascotChange, parseMascotInput, sanitizeMascots } from './mascot'
 import { PANE, registerPanel } from './panel'
 import { TASK_TOOLS } from './tasks'
-import { EMPTY_STATE, isTicking, reduce, type CrewEvent } from './tracker'
+import { EMPTY_STATE, isPulsing, isTicking, reduce, type CrewEvent } from './tracker'
 
 // The engine's scan follows state refs only through consts of the same file, so each file declares its own.
 const model = atom({ plugin: 'crew', key: 'model' } as const, EMPTY_STATE)
@@ -15,7 +15,10 @@ const mascots = atom({ plugin: 'crew', key: 'mascots' } as const, {} as MascotPr
 const hasAutoOpened = atom({ plugin: 'crew', key: 'hasAutoOpened' } as const, false)
 const groupOpen = atom({ plugin: 'crew', key: 'groupOpen' } as const, {} as Record<string, boolean>)
 
-const TICK_MS = 1000
+// The clock beats five times a second. While an agent runs every beat redraws, so its card border breathes;
+// otherwise only every fifth does, once a second, for the elapsed times.
+const BEAT_MS = 200
+const BEATS_PER_SECOND = 5
 
 // Origins where a person typed the prompt; every other origin (agents, notifications, triggers) continues a turn.
 const PERSON_ORIGINS = new Set(['composer', 'bridge', 'sdk'])
@@ -43,8 +46,9 @@ async function dropFinishedFold($: EngineInterface) {
 }
 
 // Redraw the pane and band once a second while a clock on them is counting.
-async function tick($: EngineInterface) {
-	if (isTicking(await read($, model))) $.ui.invalidate('ui.render')
+async function tick($: EngineInterface, beat: number) {
+	const state = await read($, model)
+	if (isPulsing(state) || (beat % BEATS_PER_SECOND === 0 && isTicking(state))) $.ui.invalidate('ui.render')
 }
 
 // The first spawn of a session opens the pane only where it would be a sidebar; elsewhere it says how to open it.
@@ -81,7 +85,8 @@ export const register: Register = on => {
 		await $.tool.register(SET_MASCOT_SPEC)
 		await loadMascots($)
 		ticker?.cancel()
-		ticker = $.clock.every(TICK_MS, () => void tick($).catch(() => undefined))
+		let beat = 0
+		ticker = $.clock.every(BEAT_MS, () => void tick($, ++beat).catch(() => undefined))
 		return next(e)
 	})
 

@@ -4,6 +4,7 @@ import {
 	EMPTY_STATE,
 	MAIN,
 	contextFraction,
+	isPulsing,
 	isTicking,
 	reduce,
 	selectGroups,
@@ -392,4 +393,23 @@ test('a list left unfinished by an earlier prompt is not shown until this prompt
 	// A continuation of the same prompt (an agent message) keeps showing the list it already had.
 	const continued = reduce(resumed, { kind: 'turnStart', at: 60_000, turnId: 't3', text: '<agent-message>', isPerson: false })
 	expect(selectProgress(continued)?.source).toBe('tasks')
+})
+
+test('borders pulse while any agent runs, Main included, and not while they only wait', async () => {
+	expect(isPulsing(EMPTY_STATE)).toBe(false)
+	const started = run(START)
+	expect(isPulsing(started)).toBe(true)
+	const mainDone = reduce(started, { kind: 'turnEnd', at: 5000, isAborted: false, reason: 'answer' })
+	// Main has ended but its sub-agents still run.
+	expect(isPulsing(mainDone)).toBe(true)
+	const queued = reduce(
+		['a1', 'a2'].reduce(
+			(state, agentId) => reduce(state, { kind: 'turnEnd', at: 6000, agentId, isAborted: false, reason: 'answer' }),
+			mainDone
+		),
+		{ kind: 'statuses', at: 6500, list: [{ id: 'a3', status: 'pending' }] }
+	)
+	// Time still counts for the queued agent, but nothing is at work: no pulse.
+	expect(isTicking(queued)).toBe(true)
+	expect(isPulsing(queued)).toBe(false)
 })

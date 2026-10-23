@@ -101,6 +101,8 @@ export type RowView = {
 	// The mascot: its species (in the slot of its accent) and its pose, which only moves while it runs.
 	species: Species
 	pose: Pose
+	// How far a running card's border has breathed toward its accent, 0 to PULSE.strength; null when it does not run.
+	pulse: number | null
 	sprite: SpriteCell[][]
 }
 
@@ -150,6 +152,26 @@ function accentOf(agent: AgentRecord, state: CrewState): string {
 // The same slot as the colour, so a species and its colour travel together and neighbours never look alike.
 const speciesOf = (agent: AgentRecord, state: CrewState): Species =>
 	agent.id === MAIN ? 'pip' : SPECIES_ORDER[slotOf(agent, state) % SPECIES_ORDER.length]
+
+// A running card's border breathes: a two-second cycle, at its peak a little over halfway from rest to the accent.
+export const PULSE = { cycleMs: 2000, strength: 0.55 }
+
+const pulseAt = (now: number) => ((1 - Math.cos((2 * Math.PI * now) / PULSE.cycleMs)) / 2) * PULSE.strength
+
+// The terminal's border at rest, which the pulse blends from: the graphical surfaces fade the accent in instead.
+const TERMINAL_REST = [0x5f, 0x5e, 0x5a]
+const GRAPHICAL_REST_ALPHA = 0.2
+
+export function pulseColor(accent: string, pulse: number, surface: 'graphical' | 'terminal'): string {
+	const channels = [1, 3, 5].map(at => parseInt(accent.slice(at, at + 2), 16))
+	if (surface === 'graphical') {
+		// The accent's own opacity, so the border sits on a light or a dark card alike.
+		const alpha = Math.round((GRAPHICAL_REST_ALPHA + pulse) * 100) / 100
+		return `rgba(${channels.join(',')},${alpha})`
+	}
+	const blend = channels.map((value, i) => Math.round(TERMINAL_REST[i] + (value - TERMINAL_REST[i]) * pulse))
+	return '#' + blend.map(value => value.toString(16).padStart(2, '0')).join('').toUpperCase()
+}
 
 const POSES: Record<Tone, Pose> = { running: 'running', waiting: 'paused', done: 'still', failed: 'stopped' }
 
@@ -207,6 +229,7 @@ function rowView(
 		role: agent.role,
 		species,
 		pose,
+		pulse: tone === 'running' ? pulseAt(now) : null,
 		// The terminal redraws each second while anything runs: the second's parity is a running mascot's beat.
 		sprite:
 			options.sprites === false

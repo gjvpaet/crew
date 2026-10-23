@@ -315,6 +315,10 @@ export const isTicking = (state: CrewState) =>
 		return !!agent && isLive(agent)
 	})
 
+// A card border breathes while its agent is at work: Main through its open turn, or any running sub-agent.
+export const isPulsing = (state: CrewState) =>
+	state.agents[MAIN]?.status === 'running' || state.order.some(id => state.agents[id]?.status === 'running')
+
 export const selectRunning = (state: CrewState) =>
 	state.order.filter(id => state.agents[id]?.status === 'running').length
 

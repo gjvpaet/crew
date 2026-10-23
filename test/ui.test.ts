@@ -383,7 +383,7 @@ test('where the surface has not said, the first spawn only says how', async ($, 
 	expect(seen.toasts).toEqual(['Crew: /crew opens the Agents panel'])
 })
 
-test('the pane and band redraw each second only while time is counting', async ($, on) => {
+test('the pane and band redraw only while time is counting, five a second while an agent runs', async ($, on) => {
 	const seen = fresh()
 	const clock = mock.clock(on, { now: 1000 })
 	mock.store(on)
@@ -396,12 +396,13 @@ test('the pane and band redraw each second only while time is counting', async (
 	await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
 	await clock.advance(3000)
 	expect(redraws).toBe(0)
+	// While Main runs its card border breathes: five redraws a second.
 	await $.turn.start({ text: 'Go', turnId: 't1' })
 	await clock.advance(3000)
-	expect(redraws).toBe(3)
+	expect(redraws).toBe(15)
 	await $.turn.complete({ turnId: 't1', answer: 'x', durationMs: 1, isAborted: false, reason: 'answer' } as any)
 	await clock.advance(3000)
-	expect(redraws).toBe(3)
+	expect(redraws).toBe(15)
 })
 
 // The kit guards $.state (a throwing state hook is skipped, a refused read is unset), so the failure injected here
@@ -554,4 +555,19 @@ test("once Main's turn ends, its band Pip rests", async ($, on) => {
 	expect(pip?.props.isInteractive).toBeFalsy()
 	expect(String(pip?.props.source)).not.toContain('<animate')
 	await ui.unmount()
+})
+
+test('a running card border breathes in its own colour; a finished card keeps the plain border', async ($, on) => {
+	await startTwoAgents($, on)
+	await $.turn.complete({ turnId: 's', agentId: 'a1', answer: 'x', durationMs: 1, isAborted: false, reason: 'answer' } as any)
+	const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	const running = await ui.find({ key: 'row-a2' })
+	expect(String(running?.props.borderColor)).toMatch(/^rgba\(127,119,221,0\.\d+\)$/)
+	expect(running?.props.borderStyle).toBe('round')
+	const finished = await ui.find({ key: 'row-a1' })
+	expect(finished?.props.borderColor).toBeUndefined()
+	await ui.unmount()
+	const terminal = await $.ui.mount({ ...PANE, surface: 'terminal' })
+	expect(String((await terminal.find({ key: 'row-a2' }))?.props.borderColor)).toMatch(/^#[0-9A-F]{6}$/)
+	await terminal.unmount()
 })

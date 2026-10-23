@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import { PALETTE, SPECIES_ORDER } from '../hooks/sprite'
 import { EMPTY_STATE, reduce, selectProgress, type CrewEvent } from '../hooks/tracker'
-import { ACCENTS, COLLAPSE_AFTER, bandLine, effortToneOf, panelView, toggleGroup } from '../hooks/view'
+import { ACCENTS, COLLAPSE_AFTER, PULSE, bandLine, effortToneOf, panelView, pulseColor, toggleGroup } from '../hooks/view'
 
 const usage = { input_tokens: 1000, output_tokens: 500, cache_read_input_tokens: 10_000, cache_creation_input_tokens: 2000, model: 'claude-opus-5-5' }
 const spawn = (agentId: string, description: string): CrewEvent => ({
@@ -371,4 +371,31 @@ test('on the terminal a running mascot changes from one second to the next; a fi
 	const [a, b] = [at(30_000), at(31_000)]
 	expect(a.find(row => row.id === 'a2')?.sprite).not.toEqual(b.find(row => row.id === 'a2')?.sprite)
 	expect(a.find(row => row.id === 'a1')?.sprite).toEqual(b.find(row => row.id === 'a1')?.sprite)
+})
+
+// The kit has no toBeCloseTo: within a millionth is close enough for a colour level.
+const near = (value: number | null | undefined, target: number) => value !== null && value !== undefined && Math.abs(value - target) < 1e-6
+
+test('a running row breathes on a two-second cycle; any other row holds still', async () => {
+	const pulseAt = (now: number, id: string) =>
+		panelView(STATE, {}, now, 20, {}).groups.flatMap(group => group.rows).find(row => row.id === id)?.pulse
+	// At rest at the top of a cycle, at its peak half way, and back.
+	expect(near(pulseAt(30_000, 'a2'), 0)).toBe(true)
+	expect(near(pulseAt(31_000, 'a2'), PULSE.strength)).toBe(true)
+	expect(near(pulseAt(30_500, 'a2'), PULSE.strength / 2)).toBe(true)
+	expect(near(pulseAt(32_000, 'a2'), 0)).toBe(true)
+	expect(PULSE.strength).toBe(0.55)
+	expect(PULSE.cycleMs).toBe(2000)
+	// a1 has finished.
+	expect(pulseAt(31_000, 'a1')).toBeNull()
+	expect(near(panelView(STATE, {}, 31_000, 20, {}).main?.pulse, PULSE.strength)).toBe(true)
+})
+
+test('the pulse colour: the accent at a rising opacity on desktop, a solid blend on the terminal', async () => {
+	expect(pulseColor('#1D9E75', 0, 'graphical')).toBe('rgba(29,158,117,0.2)')
+	expect(pulseColor('#1D9E75', 0.55, 'graphical')).toBe('rgba(29,158,117,0.75)')
+	// The terminal has no opacity: a grey that blends toward the accent.
+	expect(pulseColor('#1D9E75', 0, 'terminal')).toBe('#5F5E5A')
+	expect(pulseColor('#1D9E75', 1, 'terminal')).toBe('#1D9E75')
+	expect(pulseColor('#1D9E75', 0.55, 'terminal')).toMatch(/^#[0-9A-F]{6}$/)
 })

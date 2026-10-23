@@ -58,7 +58,7 @@ That is the terminal. On desktop, vscode and mobile the bar is one 200×18 px SV
   - Waiting (`pending`, `waiting`, `idle`)
   - Finished (`completed`)
   - Failed (`failed`, `killed`, and agents stopped by an aborted turn, labelled *stopped*)
-- **Each agent is a rounded card:** Pip on the left (a crisp 32 px SVG on desktop, vscode and mobile; half-block text on the terminal), then:
+- **Each agent is a rounded card:** Pip on the left (a crisp 32 px sprite in a 40×44 SVG on desktop, vscode and mobile; half-block text on the terminal), then:
   - description, with elapsed time and a badge on the right: ✓ (finished), ✗ (failed) or `✗ stopped` as one unit, so "stopped" never wraps away from its mark; the title gives way first in a narrow pane
   - one Text that truncates as a unit: effort coloured by level (low green, medium blue, high amber, xhigh/max red), only when the event data includes it (never inferred), then model · ctx % · tokens · ≈$ for that agent's lifetime usage, then `↳ from <parent>` for a nested agent, which stays after the agent ends
   - per-agent step progress (`3/5 · step name`) only when that agent's own task-list calls are visible
@@ -66,6 +66,8 @@ That is the terminal. On desktop, vscode and mobile the bar is one 200×18 px SV
 - **A Main card** for the lead agent. Main starts from zero each turn, so it matches the header; a sub-agent that carries over from an earlier turn shows its lifetime usage, so the rows can exceed the header totals. Once Main's own turn has ended while sub-agents are still running, pending or waiting (idle ones do not count), it reads `waiting on N agents` instead of ✓ and its bar shimmers.
 - **Many agents:** with more than 8 sub-agents (Main not counted), Finished starts folded; every group starts open otherwise. A new prompt drops the user's Finished fold so that default applies again; folds of the other groups stand.
 - **Nested agents:** listed flat, with `↳ from <parent description>` taken from `parentId`.
+
+- **A running card's border breathes** in its agent's colour (Main's included while its turn runs): a two-second cosine cycle from rest to 55% of the way to the accent. Desktop, vscode and mobile draw the accent at an opacity of 0.2 to 0.75, which sits on light and dark cards alike; the terminal blends a solid hex from grey `#5F5E5A` toward the accent. Every other card keeps the surface's own border. The clock beats every 200 ms: each beat redraws while any agent runs (`isPulsing`), otherwise every fifth beat redraws while time counts (`isTicking`), so the rate is five a second only while something is at work.
 
 ### Mascots
 

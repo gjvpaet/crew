@@ -6,7 +6,7 @@ import { clamp } from './format'
 import type { Species, SpriteCell } from './sprite'
 import { barSvg, pipHeight, pipSvg, pipWidth } from './svg'
 import { EMPTY_STATE } from './tracker'
-import { panelView, toggleGroup, type RowView, type Tone } from './view'
+import { panelView, pulseColor, toggleGroup, type RowView, type Tone } from './view'
 
 export const PANE = 'crew'
 
@@ -111,7 +111,16 @@ export function registerPanel(on: On) {
 			)
 
 		const agentCard = (row: RowView) => (
-			<Box key={`row-${row.id}`} flexDirection="row" gap={1} borderStyle="round" paddingX={1} marginBottom={1}>
+			<Box
+				key={`row-${row.id}`}
+				flexDirection="row"
+				gap={1}
+				borderStyle="round"
+				// A running card's border breathes in its accent; every other card keeps the surface's own border.
+				{...(row.pulse === null ? {} : { borderColor: pulseColor(row.accent, row.pulse, Svg ? 'graphical' : 'terminal') })}
+				paddingX={1}
+				marginBottom={1}
+			>
 				{mascot(row)}
 				<Box flexDirection="column" flexGrow={1}>
 					<Box flexDirection="row" justifyContent="space-between" gap={1}>
