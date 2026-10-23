@@ -1,0 +1,81 @@
+import type { Accessory, MascotPrefs, MascotStyle, Role } from '../types'
+
+export type SpriteCell = { ch: string; fg?: string; bg?: string }
+
+export const PALETTE = { body: '#7C9CF5', shade: '#5570C8', eye: '#1C1F2B' }
+
+export const ACCENTS: Record<Exclude<Accessory, 'none'>, { main: string; dark: string }> = {
+	headset: { main: '#AEB6C4', dark: '#5B6475' },
+	beret: { main: '#E0566B', dark: '#B83A50' },
+	glasses: { main: '#2B2F3A', dark: '#2B2F3A' },
+	hardhat: { main: '#F2B705', dark: '#C99500' }
+}
+
+export const DEFAULT_ACCESSORY: Record<Role, Accessory> = {
+	developer: 'headset',
+	designer: 'beret',
+	researcher: 'glasses',
+	reviewer: 'hardhat',
+	plain: 'none'
+}
+
+// B body, D shade (feet), E eye, A accessory, a accessory dark, '.' empty.
+const BASE = ['........', '........', '..BBBB..', '.BBBBBB.', '.BEBBEB.', '.BBBBBB.', '..BBBB..', '.DD..DD.']
+
+const OVERLAYS: Record<Accessory, Record<number, string>> = {
+	headset: { 1: '..AAAA..', 2: '.A....A.', 3: 'a......a', 4: 'a......a' },
+	beret: { 0: '....a...', 1: '..AAAAA.', 2: '.AAAAA..' },
+	glasses: { 4: '.AEAAEA.' },
+	hardhat: { 1: '..AAAA..', 2: 'aAAAAAAa' },
+	none: {}
+}
+
+const styleFor = (role: Role, prefs: MascotPrefs): MascotStyle => prefs[role] ?? {}
+
+export function spriteGrid(role: Role, prefs: MascotPrefs): string[] {
+	const accessory = styleFor(role, prefs).accessory ?? DEFAULT_ACCESSORY[role]
+	const overlay = OVERLAYS[accessory]
+	return BASE.map((row, index) => {
+		const layer = overlay[index]
+		if (!layer) return row
+		return [...row].map((ch, col) => (layer[col] === '.' ? ch : layer[col])).join('')
+	})
+}
+
+function colourOf(ch: string, accessory: Accessory, style: MascotStyle): string | undefined {
+	const accent = accessory === 'none' ? undefined : ACCENTS[accessory]
+	switch (ch) {
+		case 'B':
+			return style.body ?? PALETTE.body
+		case 'D':
+			return style.body ?? PALETTE.shade
+		case 'E':
+			return PALETTE.eye
+		case 'A':
+			return style.accent ?? accent?.main
+		case 'a':
+			return style.accent ?? accent?.dark
+		default:
+			return undefined
+	}
+}
+
+function cell(top: string | undefined, bottom: string | undefined): SpriteCell {
+	if (top && bottom) return { ch: '▀', fg: top, bg: bottom }
+	if (top) return { ch: '▀', fg: top }
+	if (bottom) return { ch: '▄', fg: bottom }
+	return { ch: ' ' }
+}
+
+export function spriteCells(role: Role, prefs: MascotPrefs): SpriteCell[][] {
+	const style = styleFor(role, prefs)
+	const accessory = style.accessory ?? DEFAULT_ACCESSORY[role]
+	const grid = spriteGrid(role, prefs)
+	const rows: SpriteCell[][] = []
+	for (let r = 0; r < 4; r++) {
+		const top = grid[r * 2]
+		const bottom = grid[r * 2 + 1]
+		rows.push([...top].map((_, col) => cell(colourOf(top[col], accessory, style), colourOf(bottom[col], accessory, style))))
+	}
+	return rows
+}
