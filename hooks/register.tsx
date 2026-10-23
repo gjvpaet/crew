@@ -13,6 +13,7 @@ const model = atom({ plugin: 'crew', key: 'model' } as const, EMPTY_STATE)
 const isBandHidden = atom({ plugin: 'crew', key: 'isBandHidden' } as const, false)
 const mascots = atom({ plugin: 'crew', key: 'mascots' } as const, {} as MascotPrefs)
 const hasAutoOpened = atom({ plugin: 'crew', key: 'hasAutoOpened' } as const, false)
+const groupOpen = atom({ plugin: 'crew', key: 'groupOpen' } as const, {} as Record<string, boolean>)
 
 const TICK_MS = 1000
 
@@ -30,6 +31,12 @@ async function loadMascots($: EngineInterface) {
 	const saved = sanitizeMascots(await $.store.get('mascots'))
 	const same = (prefs: MascotPrefs) => JSON.stringify(prefs) === JSON.stringify(saved)
 	if (!same(await read($, mascots))) await update($, mascots, prefs => (same(prefs) ? prefs : saved))
+}
+
+// A new prompt lets Finished fold again by itself past COLLAPSE_AFTER; the user's other folds stand.
+async function dropFinishedFold($: EngineInterface) {
+	if (!('Finished' in (await read($, groupOpen)))) return
+	await update($, groupOpen, ({ Finished: _dropped, ...rest } = {}) => rest)
 }
 
 // Redraw the pane and band once a second while a clock on them is counting.
@@ -71,7 +78,10 @@ export const register: Register = on => {
 	on('turn.start', async ($, e, next) => {
 		await apply($, { kind: 'turnStart', at: await $.clock.now(), turnId: e.turnId, text: e.text, agentId: e.agentId })
 		if (!e.agentId) await loadMascots($)
-		if (!e.agentId && e.text !== '') await update($, isBandHidden, () => false)
+		if (!e.agentId && e.text !== '') {
+			await update($, isBandHidden, () => false)
+			await dropFinishedFold($)
+		}
 		return next(e)
 	})
 

@@ -68,9 +68,21 @@ test('barSvg shimmer moves with the clock and is the same for the same moment', 
 	const at = (now: number) => barSvg({ fraction: 0, width: 200, height: 6, color: '#7F77DD', now, isShimmer: true })
 	const first = part(at(1000), 'shimmer')
 	expect(first).toBeDefined()
-	expect(attr(at(1000).match(/<rect\b[^>]*class="shimmer"[^>]*>/)?.[0], 'x')).toBe(attr(first, 'x'))
-	expect(attr(part(at(1600), 'shimmer'), 'x')).not.toBe(attr(first, 'x'))
+	expect(attr(part(at(2000), 'shimmer'), 'x')).not.toBe(attr(first, 'x'))
 	expect(at(1000)).toBe(at(1000))
+})
+
+test('the shimmer only steps right, one tick at a time, then wraps, on narrow and wide bars', async () => {
+	for (const width of [120, 320]) {
+		const x = (now: number) =>
+			Number(attr(part(barSvg({ fraction: 0, width, height: 6, color: '#7F77DD', now, isShimmer: true }), 'shimmer'), 'x'))
+		const sweep = [0, 1, 2, 3, 4, 5].map(second => x(10_000 * 6 + second * 1000))
+		for (let i = 1; i < sweep.length; i++) expect(sweep[i]).toBeGreaterThan(sweep[i - 1])
+		// The next second wraps to the start; a tick anywhere inside a second draws the same place.
+		expect(x(66_000)).toBe(sweep[0])
+		expect(x(60_999)).toBe(sweep[0])
+		expect(sweep[5]).toBe(width)
+	}
 })
 
 test('bandBarSvg draws the pill centred inside the bar, its text escaped', async () => {
@@ -85,13 +97,44 @@ test('bandBarSvg draws the pill centred inside the bar, its text escaped', async
 	})
 	expect(isWellFormed(svg)).toBe(true)
 	expect(attr(part(svg, 'fill'), 'width')).toBe('40')
-	const pill = part(svg, 'pill')
-	expect(attr(pill, 'fill')).toBe('#534AB7')
-	const x = Number(attr(pill, 'x'))
-	const width = Number(attr(pill, 'width'))
-	expect(Math.abs(x + width / 2 - 80)).toBeLessThan(0.01)
+	expect(attr(part(svg, 'pill'), 'fill')).toBe('#534AB7')
 	expect(svg).toContain('>A &amp; &lt;B&gt;</text>')
 	expect(svg).toContain('font-family="system-ui, sans-serif"')
 	expect(svg).toContain('fill="#EEEDFE"')
 	expect(svg).not.toContain('<B>')
+})
+
+test('the band pill sits away from the fill edge so the progress stays visible', async () => {
+	for (const fraction of [0.3, 0.7]) {
+		const svg = bandBarSvg({
+			fraction,
+			width: 200,
+			height: 18,
+			color: '#7F77DD',
+			pill: 'Tasks 2/9',
+			pillBg: '#534AB7',
+			pillFg: '#EEEDFE'
+		})
+		const pill = part(svg, 'pill')
+		const x = Number(attr(pill, 'x'))
+		const width = Number(attr(pill, 'width'))
+		const edge = Number(attr(part(svg, 'fill'), 'width'))
+		expect(edge).toBe(fraction * 200)
+		expect(edge >= x && edge <= x + width).toBe(false)
+		// Inset 2px from the end it sits at, and the text stays inside it.
+		expect(fraction < 0.5 ? 200 - (x + width) : x).toBe(2)
+		const textX = Number(/<text x="([^"]*)"/.exec(svg)?.[1])
+		expect(textX).toBeGreaterThan(x)
+		expect(textX).toBeLessThan(x + width)
+	}
+})
+
+test('pipSvg gives the same drawing again and follows a prefs change', async () => {
+	const first = pipSvg('designer', {}, 32)
+	expect(pipSvg('designer', {}, 32)).toBe(first)
+	const hardhat = pipSvg('designer', { designer: { accessory: 'hardhat' } }, 32)
+	expect(hardhat).not.toBe(first)
+	expect(pipSvg('designer', { designer: { accessory: 'hardhat' } }, 32)).toBe(hardhat)
+	expect(pipSvg('designer', {}, 16)).not.toBe(first)
+	expect(pipSvg('designer', {}, 32)).toBe(first)
 })

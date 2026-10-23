@@ -37,7 +37,7 @@ From the Claude Code mods docs (overview, reference, events, interface, api):
 
 Every gap between segments comes from the row's `gap`, never from spaces inside a text (Desktop drops trailing spaces).
 
-That is the terminal. On desktop, vscode and mobile the bar is one 160×18 px SVG with the pill (`Tasks 3/5`) drawn inside it (purple pill, lilac fill), and a 16 px developer Pip sits before `N running`.
+That is the terminal. On desktop, vscode and mobile the bar is one 200×18 px SVG with the pill (`Tasks 3/5`) drawn inside it (purple pill, violet `#7F77DD` fill). The pill sits at the end away from the fill's edge (right while under half done, left from half on), so it never hides the progress, and a 16 px developer Pip sits before `N running`.
 
 - **Shown when** a turn is running and either at least one sub-agent exists or a task list has been seen. A turn with neither shows no band.
 - **Label:** the first line of the user's prompt, shortened (task lists have no title in the tool data, so it is always the prompt).
@@ -58,12 +58,12 @@ That is the terminal. On desktop, vscode and mobile the bar is one 160×18 px SV
   - Finished (`completed`)
   - Failed (`failed`, `killed`, and agents stopped by an aborted turn, labelled *stopped*)
 - **Each agent is a rounded card:** Pip on the left (a crisp 32 px SVG on desktop, vscode and mobile; half-block text on the terminal), then:
-  - description, with elapsed time and ✓ (finished), ✗ (failed or stopped) or a note on the right
-  - effort coloured by level (low green, medium blue, high amber, xhigh/max red), only when the event data includes it (never inferred), then model · ctx % · tokens · ≈$ for that agent's lifetime usage
+  - description, with elapsed time and ✓ (finished) or ✗ (failed or stopped) on the right; the title gives way first in a narrow pane
+  - effort coloured by level (low green, medium blue, high amber, xhigh/max red), only when the event data includes it (never inferred), then model · ctx % · tokens · ≈$ for that agent's lifetime usage, then its notes (`↳ from <parent>`, `stopped`), which stay after the agent ends
   - per-agent step progress (`3/5 · step name`) only when that agent's own task-list calls are visible
   - a bar in the agent's own colour (six fixed accents, the next one taken when the agent is first seen and kept for its life, through a resume too; Main wears Pip's blue `#7C9CF5`, which no sub-agent gets): to scale with steps, full at the end, a shimmer while running without steps. An SVG off the terminal, the text bar on it.
-- **A Main card** for the lead agent. Main starts from zero each turn, so it matches the header; a sub-agent that carries over from an earlier turn shows its lifetime usage, so the rows can exceed the header totals. Once Main's own turn has ended while sub-agents still run, it reads `waiting on N agents` instead of ✓.
-- **Many agents:** with more than 8 sub-agents (Main not counted), Finished starts folded; every group starts open otherwise.
+- **A Main card** for the lead agent. Main starts from zero each turn, so it matches the header; a sub-agent that carries over from an earlier turn shows its lifetime usage, so the rows can exceed the header totals. Once Main's own turn has ended while sub-agents are still running, pending or waiting (idle ones do not count), it reads `waiting on N agents` instead of ✓ and its bar shimmers.
+- **Many agents:** with more than 8 sub-agents (Main not counted), Finished starts folded; every group starts open otherwise. A new prompt drops the user's Finished fold so that default applies again; folds of the other groups stand.
 - **Nested agents:** listed flat, with `↳ from <parent description>` taken from `parentId`.
 
 ### Mascots
@@ -89,12 +89,12 @@ Each unit has one job. The calculating units import nothing from the UI and are 
 
 | Unit | Responsibility | Depends on |
 |---|---|---|
-| `tracker.ts` | A pure reducer: `(state, event) → state`. Holds the current turn, the main task list, per-agent task lists, an `agents` map keyed by agent id (`description, type, role, model, effort?, status, parentId, spawnedAt, endedAt, usage {input, output, cacheRead, cacheWrite}, lastRequestInput, steps?, colorIndex?`), per-model usage for the session and for the turn (`sessionByModel`, `turnByModel`) `known`, the identity of every agent seen (colour index included), and `nextColor`, the index the next new sub-agent takes. Also exports derived selectors for progress, totals and groups. | `roles.ts`, `pricing.ts`, `tasks.ts` |
+| `tracker.ts` | A pure reducer: `(state, event) → state`. Holds the current turn, the main task list, per-agent task lists, an `agents` map keyed by agent id (`description, type, role, model, effort?, status, parentId, spawnedAt, endedAt, usage {input, output, cacheRead, cacheWrite}, lastRequestInput, steps?, colorIndex?`), per-model usage for the session and for the turn (`sessionByModel`, `turnByModel`) `known`, the identity of every agent seen (colour index included, also for an agent first seen through a step or its own turn rather than a spawn), and `nextColor`, the index the next new sub-agent takes (for state saved before it existed, seeded past every stored index and the order's length). Also exports derived selectors for progress, totals and groups. | `roles.ts`, `pricing.ts`, `tasks.ts` |
 | `tasks.ts` | Turns task-list tool calls (`TodoWrite`, `TaskCreate`, `TaskUpdate`, `mcp__ccd_turn__update_plan`) into a task list and `{done, total, current}`. | none |
 | `pricing.ts` | Per-model price table (input, output, cacheRead, cacheWrite per MTok, plus context window) with an `asOf` date. `estimateUsd(usage, model)` returns `null` for unknown models. `contextWindow(model)` comes from the same table. | none |
 | `roles.ts` | `roleFor({type, description})` returns `developer | designer | researcher | reviewer | plain`. | none |
 | `sprite.ts` | The base 8×8 grid plus accessory overlays and colours. `spritePixels` lists the coloured pixels; `spriteCells` packs them into half-block cells. | none |
-| `svg.ts` | Pure SVG markup builders for the non-terminal surfaces: `pipSvg` (one crisp rect per pixel), `barSvg` (rounded track, fill, deterministic shimmer from `now`), `bandBarSvg` (bar plus a centred pill), `escapeXml`. Hex/rgba only: theme names do not reach inside an SVG. | `sprite.ts`, `format.ts` |
+| `svg.ts` | Pure SVG markup builders for the non-terminal surfaces: `pipSvg` (one crisp rect per pixel), `barSvg` (rounded track, fill, a shimmer that steps right a fifth of its travel each second, six places, then wraps), `bandBarSvg` (bar plus a pill on the side away from the fill edge). `pipSvg` output is cached by role, size and that role's prefs, `escapeXml`. Hex/rgba only: theme names do not reach inside an SVG. | `sprite.ts`, `format.ts` |
 | `mascot.ts` | The `set_mascot` tool spec, input validation and the pure function that applies a change to the saved prefs. | none |
 | `format.ts` | Display helpers: token, ≈$, duration and percent formatting, text bars, the running shimmer, truncation, model names. | none |
 | `view.ts` | Pure view models: `bandLine` and `panelView` (rows, groups, header cards) built from tracker selectors. A row carries its accent, effort and its theme tone, model, `fraction` (null = shimmer) and Main's waiting state; `panelView` takes the `groupOpen` overrides and `toggleGroup` computes the next one. | `tracker.ts`, `sprite.ts`, `pricing.ts`, `format.ts` |

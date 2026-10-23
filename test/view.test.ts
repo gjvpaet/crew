@@ -91,7 +91,6 @@ test('effort maps to a theme tone', async () => {
 })
 
 test('each agent takes the next accent at spawn; Main wears Pip blue', async () => {
-	expect(ACCENTS).toEqual(['#1D9E75', '#7F77DD', '#D85A30', '#378ADD', '#D4537E', '#BA7517'])
 	const seven = ['a4', 'a5', 'a6', 'a7'].reduce((state, id) => reduce(state, spawn(id, `Job ${id}`)), STATE)
 	const view = panelView(seven, {}, 30_000, 20, {})
 	const rows = view.groups.flatMap(group => group.rows)
@@ -128,23 +127,56 @@ test('a resumed agent keeps its colour', async () => {
 	expect(accentsOf(respawned).a4).toBe(ACCENTS[3])
 })
 
-test('six spawns cycle through all six colours, then start again', async () => {
+test('six agents get six different colours, the seventh repeats the first', async () => {
 	const ids = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7']
 	const state = ids.reduce((acc, id) => reduce(acc, spawn(id, `Job ${id}`)), EMPTY_STATE)
 	const accents = accentsOf(state)
-	expect(ids.slice(0, 6).map(id => accents[id])).toEqual(ACCENTS)
-	expect(accents.c7).toBe(ACCENTS[0])
-	expect(state.nextColor).toBe(7)
+	expect(new Set(ids.slice(0, 6).map(id => accents[id])).size).toBe(6)
+	expect(accents.c7).toBe(accents.c1)
+	expect(Object.values(accents)).not.toContain(PALETTE.body)
 })
 
 test('agents first seen without a spawn take the next colour; Main never does', async () => {
 	const stepped = reduce(STATE, { kind: 'step', at: 4000, agentId: 'x1', model: 'claude-opus-5-5', usage })
-	expect(stepped.agents.x1.colorIndex).toBe(3)
 	const started = reduce(stepped, { kind: 'turnStart', at: 5000, turnId: 's2', text: 'go', agentId: 'x2' })
-	expect(started.agents.x2.colorIndex).toBe(4)
 	const mainStep = reduce(started, { kind: 'step', at: 6000, model: 'claude-opus-5-5', usage })
-	expect(mainStep.agents.main.colorIndex).toBeUndefined()
-	expect(mainStep.nextColor).toBe(5)
+	const view = panelView(mainStep, {}, 30_000, 20, {})
+	const accents = accentsOf(mainStep)
+	expect(new Set(Object.values(accents)).size).toBe(5)
+	expect(view.main?.accent).toBe(PALETTE.body)
+	// A later spawn takes the colour after them.
+	expect(accentsOf(reduce(mainStep, spawn('a9', 'Late job'))).a9).toBe(ACCENTS[5])
+})
+
+test('an agent first seen without a spawn keeps its colour through a resume', async () => {
+	const stepped = reduce(STATE, { kind: 'step', at: 4000, agentId: 'x1', model: 'claude-opus-5-5', usage })
+	const colour = accentsOf(stepped).x1
+	const ended = reduce(stepped, { kind: 'turnEnd', at: 5000, agentId: 'x1', isAborted: false, reason: 'answer' })
+	const next = reduce(ended, { kind: 'turnStart', at: 6000, turnId: 't2', text: 'Next prompt' })
+	expect(next.agents.x1).toBeUndefined()
+	const busy = reduce(next, spawn('a8', 'Another job'))
+	const resumed = reduce(busy, { kind: 'turnStart', at: 7000, turnId: 's3', text: 'again', agentId: 'x1' })
+	expect(accentsOf(resumed).x1).toBe(colour)
+	const stepAgain = reduce(busy, { kind: 'step', at: 7000, agentId: 'x1', model: 'claude-opus-5-5', usage })
+	expect(accentsOf(stepAgain).x1).toBe(colour)
+})
+
+test('state saved before colours were stored seeds the next colour past those in use', async () => {
+	// Older shape: no nextColor, one agent already holding index 4.
+	const { nextColor: _dropped, ...older } = reduce(STATE, spawn('a4', 'Fourth'))
+	const withHigh = { ...older, agents: { ...older.agents, a4: { ...older.agents.a4, colorIndex: 4 } } } as any
+	expect(accentsOf(reduce(withHigh, spawn('n1', 'New one'))).n1).toBe(ACCENTS[5])
+	// No stored indices at all: the colours the order gives must not be handed out again.
+	const bare = {
+		...older,
+		agents: Object.fromEntries(
+			Object.entries(older.agents).map(([id, { colorIndex: _c, ...agent }]) => [id, agent])
+		),
+		known: Object.fromEntries(Object.entries(older.known).map(([id, { colorIndex: _c, ...who }]) => [id, who]))
+	} as any
+	const seeded = accentsOf(reduce(bare, spawn('n1', 'New one')))
+	expect(seeded.n1).toBe(ACCENTS[4])
+	expect(Object.values(seeded).filter(colour => colour === seeded.n1)).toHaveLength(1)
 })
 
 test('the row fraction drives the bar: steps, done, shimmer, waiting', async () => {
@@ -181,6 +213,11 @@ test('Main waits on its running agents, then shows done', async () => {
 	expect(waiting?.tone).toBe('waiting')
 	expect(waiting?.mark).toBe('')
 	expect(waiting?.note).toBe('waiting on 2 agents')
+	expect(waiting?.badge).toBe('waiting on 2 agents')
+	expect(waiting?.aside).toBe('')
+	// Main keeps moving while it waits.
+	expect(waiting?.fraction).toBeNull()
+	expect(waiting?.bar).not.toBe('░'.repeat(20))
 	const oneLeft = reduce(mainEnded, { kind: 'turnEnd', at: 22_000, agentId: 'a2', isAborted: false, reason: 'answer' })
 	expect(panelView(oneLeft, {}, 30_000, 20, {}).main?.note).toBe('waiting on 1 agent')
 	const allDone = reduce(oneLeft, { kind: 'turnEnd', at: 23_000, agentId: 'a3', isAborted: false, reason: 'answer' })
@@ -188,6 +225,57 @@ test('Main waits on its running agents, then shows done', async () => {
 	expect(done?.tone).toBe('done')
 	expect(done?.mark).toBe('✓')
 	expect(done?.note).toBe('')
+	expect(done?.badge).toBe('✓')
+	expect(done?.fraction).toBe(1)
+})
+
+test('Main waits on pending and waiting agents too, not idle ones', async () => {
+	const mainEnded = reduce(STATE, { kind: 'turnEnd', at: 21_000, isAborted: false, reason: 'answer' })
+	const queued = reduce(mainEnded, {
+		kind: 'statuses',
+		at: 22_000,
+		list: [
+			{ id: 'a2', status: 'pending' },
+			{ id: 'a3', status: 'waiting' }
+		]
+	})
+	expect(panelView(queued, {}, 30_000, 20, {}).main?.note).toBe('waiting on 2 agents')
+	const idle = reduce(queued, { kind: 'statuses', at: 23_000, list: [{ id: 'a3', status: 'idle' }] })
+	expect(panelView(idle, {}, 30_000, 20, {}).main?.note).toBe('waiting on 1 agent')
+})
+
+test('a row keeps its mark on line one and its note beside the model', async () => {
+	const nested = reduce(STATE, { ...spawn('a4', 'Check the hero image'), parentId: 'a2' } as CrewEvent)
+	const aborted = reduce(nested, { kind: 'turnEnd', at: 21_000, isAborted: true, reason: 'interrupted' })
+	const rows = panelView(aborted, {}, 30_000, 20, {}).groups.flatMap(group => group.rows)
+	const stopped = rows.find(row => row.id === 'a3')
+	expect(stopped?.badge).toBe('✗')
+	expect(stopped?.aside).toBe('stopped')
+	const child = rows.find(row => row.id === 'a4')
+	expect(child?.badge).toBe('✗')
+	expect(child?.aside).toBe('↳ from Design the launch graphics · stopped')
+	const finished = rows.find(row => row.id === 'a1')
+	expect(finished?.badge).toBe('✓')
+	expect(finished?.aside).toBe('')
+})
+
+test('the badge on line one is held to about 20 characters', async () => {
+	const many = ['d1', 'd2', 'd3', 'd4', 'd5', 'd6', 'd7', 'd8', 'd9', 'd10'].reduce(
+		(state, id) => reduce(state, spawn(id, `Job ${id}`)),
+		STATE
+	)
+	const ended = reduce(many, { kind: 'turnEnd', at: 21_000, isAborted: false, reason: 'answer' })
+	const main = panelView(ended, {}, 30_000, 20, {}).main
+	expect(main?.note).toBe('waiting on 12 agents')
+	expect(main?.badge.length).toBeLessThanOrEqual(20)
+})
+
+test('rows skip the half-block sprite where the surface draws SVG', async () => {
+	const rows = (sprites: boolean) =>
+		panelView(STATE, {}, 30_000, 20, {}, { sprites }).groups.flatMap(group => group.rows)
+	expect(rows(false).every(row => row.sprite.length === 0)).toBe(true)
+	expect(rows(true).every(row => row.sprite.length === 4)).toBe(true)
+	expect(panelView(STATE, {}, 30_000, 20, {}).main?.sprite).toHaveLength(4)
 })
 
 const MANY = Array.from({ length: COLLAPSE_AFTER + 1 }, (_, i) => i).reduce(
@@ -236,4 +324,9 @@ test('toggling a group flips what it shows and nothing else', async () => {
 	expect(find(running, 'Finished')?.isCollapsed).toBe(true)
 	// A short list's Finished starts open, so its first press collapses it.
 	expect(toggleGroup({}, 'Finished', STATE)).toEqual({ Finished: false })
+})
+
+test('an empty session says so', async () => {
+	expect(panelView(EMPTY_STATE, {}, 0, 20, {}).isEmpty).toBe(true)
+	expect(panelView(STATE, {}, 0, 20, {}).isEmpty).toBe(false)
 })

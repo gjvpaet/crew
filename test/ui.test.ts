@@ -78,6 +78,10 @@ test('on desktop the band draws its bar, pill and a mini Pip as SVG', async ($, 
 	expect(bar).toBeDefined()
 	expect(String(bar?.props.source)).toContain('>Agents 0/2</text>')
 	expect(bar?.props.height).toBe(18)
+	expect(bar?.props.width).toBe(200)
+	// A fill dark enough to read against the track in light mode, not lilac.
+	expect(String(bar?.props.source)).toContain('fill="#7F77DD"')
+	expect(String(bar?.props.source)).not.toContain('#AFA9EC')
 	const [pip] = await svgs(ui, /mascot/)
 	expect(String(pip?.props.source)).toContain('shape-rendering="crispEdges"')
 	expect(pip?.props.width).toBe(16)
@@ -162,6 +166,61 @@ test('a group header collapses and reopens its group', async ($, on) => {
 	expect((await ui.find({ key: 'group-Running' }))?.text).toBe('▾ Running · 2')
 	expect(await ui.find({ type: 'Text', text: /Research competitor launches/ })).toBeDefined()
 	await ui.unmount()
+})
+
+test('an ended agent keeps its notes: stopped and where it came from', async ($, on) => {
+	await startTwoAgents($, on)
+	// The landing page agent turns out to be the research agent's child.
+	await $.agent.spawn({
+		prompt: 'go',
+		description: 'Build the landing page',
+		subagentType: 'general-purpose',
+		parentAgentId: 'a1'
+	} as any)
+	await $.turn.complete({ turnId: 't1', answer: '', durationMs: 1, isAborted: true, reason: 'interrupted' } as any)
+	for (const surface of ['terminal', 'desktop'] as const) {
+		const ui = await $.ui.mount({ ...PANE, surface })
+		expect((await ui.find({ key: 'group-Failed' }))?.text).toBe('▾ Failed · 2')
+		expect((await ui.find({ type: 'Text', text: /↳ from Research competitor launches/ }))?.text).toContain('stopped')
+		expect((await ui.findAll({ type: 'Text', text: /stopped/ })).length).toBeGreaterThanOrEqual(2)
+		expect(await ui.findAll({ type: 'Text', text: /^✗$/ })).toHaveLength(3)
+		await ui.unmount()
+	}
+})
+
+test('set_mascot redraws that role\'s Pip on desktop', async ($, on) => {
+	await startTwoAgents($, on)
+	const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	const [before] = await svgs(ui, /^developer mascot$/)
+	expect(before?.props.width).toBe(32)
+	expect(String(before?.props.source)).not.toContain('#112233')
+	await $.tool.call({ tool: 'mcp__crew__set_mascot', role: 'developer', body: '#112233' } as any)
+	const [after] = await svgs(ui, /^developer mascot$/)
+	expect(String(after?.props.source)).toContain('fill="#112233"')
+	// Only that role changes.
+	const [researcher] = await svgs(ui, /^researcher mascot$/)
+	expect(String(researcher?.props.source)).not.toContain('#112233')
+	await ui.unmount()
+})
+
+test('a new prompt drops the Finished fold so the default applies again', async ($, on) => {
+	await startTwoAgents($, on)
+	const finish = (agentId: string) =>
+		$.turn.complete({ turnId: 's', agentId, answer: 'x', durationMs: 1, isAborted: false, reason: 'answer' } as any)
+	await finish('a1')
+	const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	await ui.press({ key: 'group-Finished' })
+	expect((await ui.find({ key: 'group-Finished' }))?.text).toBe('▸ Finished · 1')
+	await ui.press({ key: 'group-Running' })
+	await ui.unmount()
+	await $.turn.start({ text: 'Next prompt', turnId: 't2' })
+	await $.agent.spawn({ prompt: 'go', description: 'Research competitor launches', subagentType: 'Explore' })
+	await finish('a1')
+	const next = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	expect((await next.find({ key: 'group-Finished' }))?.text).toBe('▾ Finished · 1')
+	// Only Finished is reset: the user's other folds stand.
+	expect((await next.find({ key: 'group-Running' }))?.text).toBe('▸ Running · 1')
+	await next.unmount()
 })
 
 test('set_mascot saves the change', async ($, on) => {

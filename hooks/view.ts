@@ -72,7 +72,12 @@ export type RowView = {
 	usageText: string
 	elapsed: string
 	steps: string
+	// Every note in one line; `badge` and `aside` are where the card draws it.
 	note: string
+	// Line one's right: ✓, ✗, or Main's `waiting on N agents`, held to BADGE_MAX characters.
+	badge: string
+	// Beside the model on line two: `stopped`, `↳ from <parent>`.
+	aside: string
 	bar: string
 	// 0..1 for a bar drawn to scale, null for a running agent with no steps to count (a shimmer).
 	fraction: number | null
@@ -101,11 +106,19 @@ function toneOf(agent: AgentRecord): Tone {
 	return 'waiting'
 }
 
-function fractionOf(agent: AgentRecord, tone: Tone): number | null {
+const BADGE_MAX = 20
+
+// What Main is still waiting on once its own turn has ended: sub-agents at work or queued, not idle ones.
+const BUSY = new Set<AgentRecord['status']>(['running', 'pending', 'waiting'])
+
+const selectBusy = (state: CrewState) => state.order.filter(id => BUSY.has(state.agents[id]?.status ?? 'completed')).length
+
+function fractionOf(agent: AgentRecord, tone: Tone, isMainWaiting: boolean): number | null {
 	const steps = agent.steps
 	if (steps && steps.total > 0) return steps.done / steps.total
 	if (tone === 'done' || tone === 'failed') return 1
-	if (tone === 'running') return null
+	// Main waiting on its agents is still at work: it shimmers rather than sitting empty.
+	if (tone === 'running' || isMainWaiting) return null
 	return 0
 }
 
@@ -116,10 +129,19 @@ function accentOf(agent: AgentRecord, state: CrewState): string {
 	return ACCENTS[index % ACCENTS.length]
 }
 
-function rowView(agent: AgentRecord, state: CrewState, prefs: MascotPrefs, now: number, barWidth: number): RowView {
-	const running = agent.id === MAIN ? selectRunning(state) : 0
+export type PanelOptions = { sprites?: boolean }
+
+function rowView(
+	agent: AgentRecord,
+	state: CrewState,
+	prefs: MascotPrefs,
+	now: number,
+	barWidth: number,
+	options: PanelOptions
+): RowView {
+	const busy = agent.id === MAIN ? selectBusy(state) : 0
 	// Main's own turn has ended but its agents still work: it is waiting on them, not done.
-	const isMainWaiting = agent.id === MAIN && agent.status === 'completed' && running > 0
+	const isMainWaiting = agent.id === MAIN && agent.status === 'completed' && busy > 0
 	const tone = isMainWaiting ? 'waiting' : toneOf(agent)
 	const tokens = totalTokens(agent.usage)
 	const cost = tokens > 0 ? estimateUsd(agent.usage, agent.model ?? '') : 0
@@ -127,17 +149,17 @@ function rowView(agent: AgentRecord, state: CrewState, prefs: MascotPrefs, now: 
 	const endedAt = agent.id === MAIN ? (state.turn?.endedAt ?? agent.endedAt) : agent.endedAt
 	const steps = agent.steps
 	const parent = agent.parentId ? state.agents[agent.parentId] : undefined
-	const notes = isMainWaiting
-		? [`waiting on ${running} agent${running === 1 ? '' : 's'}`]
-		: [parent ? `↳ from ${parent.description}` : '', agent.status === 'stopped' ? 'stopped' : ''].filter(Boolean)
-	const fraction = fractionOf(agent, tone)
+	const waitingNote = isMainWaiting ? `waiting on ${busy} agent${busy === 1 ? '' : 's'}` : ''
+	const asides = [parent ? `↳ from ${parent.description}` : '', agent.status === 'stopped' ? 'stopped' : ''].filter(Boolean)
+	const mark = tone === 'done' ? '✓' : tone === 'failed' ? '✗' : ''
+	const fraction = fractionOf(agent, tone, isMainWaiting)
 	const model = prettyModel(agent.model)
 	const usageText = [`ctx ${fmtPercent(contextFraction(agent))}`, fmtTokens(tokens), fmtUsd(cost)].join(' · ')
 	const elapsed = fmtDuration((endedAt ?? now) - startedAt)
 	return {
 		id: agent.id,
 		title: agent.description,
-		mark: tone === 'done' ? '✓' : tone === 'failed' ? '✗' : '',
+		mark,
 		meta: [agent.effort, model].filter(Boolean).join(' · '),
 		effort: agent.effort ?? '',
 		effortTone: effortToneOf(agent.effort),
@@ -146,13 +168,15 @@ function rowView(agent: AgentRecord, state: CrewState, prefs: MascotPrefs, now: 
 		usageText,
 		elapsed,
 		steps: steps ? `${steps.done}/${steps.total}${steps.current ? ` · ${steps.current}` : ''}` : '',
-		note: notes.join(' · '),
+		note: isMainWaiting ? waitingNote : asides.join(' · '),
+		badge: mark || truncate(waitingNote, BADGE_MAX),
+		aside: isMainWaiting ? '' : asides.join(' · '),
 		bar: fraction === null ? shimmer(barWidth, now) : bar(fraction, barWidth),
 		fraction,
 		accent: accentOf(agent, state),
 		tone,
 		role: agent.role,
-		sprite: spriteCells(agent.role, prefs)
+		sprite: options.sprites === false ? [] : spriteCells(agent.role, prefs)
 	}
 }
 
@@ -170,7 +194,9 @@ export function panelView(
 	prefs: MascotPrefs,
 	now: number,
 	barWidth: number,
-	groupOpen: Record<string, boolean>
+	groupOpen: Record<string, boolean>,
+	// `sprites: false` where the surface draws Pip as SVG: the half-block cells would go unused.
+	options: PanelOptions = {}
 ): PanelView {
 	const turn = selectTurnTotals(state)
 	const session = selectSessionTotals(state)
@@ -186,13 +212,13 @@ export function panelView(
 		tokens: fmtTokens(turn.tokens),
 		time: state.turn ? fmtDuration((state.turn.endedAt ?? now) - state.turn.startedAt) : '0:00',
 		session: `Session ${fmtUsd(session.costUsd)}${session.isPartial ? '+' : ''} · ${fmtTokens(session.tokens)} tokens`,
-		main: state.agents[MAIN] ? rowView(state.agents[MAIN], state, prefs, now, barWidth) : null,
+		main: state.agents[MAIN] ? rowView(state.agents[MAIN], state, prefs, now, barWidth, options) : null,
 		groups: named
 			.filter(([, agents]) => agents.length > 0)
 			.map(([name, agents]) => ({
 				name,
 				count: agents.length,
-				rows: agents.map(agent => rowView(agent, state, prefs, now, barWidth)),
+				rows: agents.map(agent => rowView(agent, state, prefs, now, barWidth, options)),
 				isCollapsed: !(groupOpen[name] ?? isOpenByDefault(name, state)),
 				isCollapsible: true
 			})),

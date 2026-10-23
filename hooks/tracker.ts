@@ -87,10 +87,28 @@ const withAgent = (state: CrewState, agent: AgentRecord): CrewState => ({
 const withOrder = (state: CrewState, id: string): string[] =>
 	id === MAIN || state.order.includes(id) ? state.order : [...state.order, id]
 
+type Colored = { agent: AgentRecord; nextColor: number; known: Record<string, AgentIdentity> }
+
 // A sub-agent keeps the colour it was first given; one without takes the next, and Main never takes one.
-function withColor(state: CrewState, agent: AgentRecord): { agent: AgentRecord; nextColor: number } {
-	if (agent.id === MAIN || agent.colorIndex !== undefined) return { agent, nextColor: state.nextColor }
-	return { agent: { ...agent, colorIndex: state.nextColor }, nextColor: state.nextColor + 1 }
+// The colour is remembered in `known` too, so an agent first seen without a spawn keeps it through a resume.
+function withColor(state: CrewState, found: AgentRecord): Colored {
+	if (found.id === MAIN) return { agent: found, nextColor: state.nextColor, known: state.known }
+	const isNew = found.colorIndex === undefined
+	const agent = isNew ? { ...found, colorIndex: state.nextColor } : found
+	const nextColor = isNew ? state.nextColor + 1 : state.nextColor
+	const remembered = state.known[agent.id]
+	if (remembered?.colorIndex === agent.colorIndex) return { agent, nextColor, known: state.known }
+	const identity = { ...(remembered ?? identityOf(agent)), colorIndex: agent.colorIndex }
+	return { agent, nextColor, known: { ...state.known, [agent.id]: identity } }
+}
+
+// The colour the next new sub-agent takes, for state saved before it was stored: past every index in use, and past
+// the places in the order that stand in for an index a record never had.
+function seedNextColor(state: Partial<CrewState>): number {
+	const indices = [...Object.values(state.agents ?? {}), ...Object.values(state.known ?? {})]
+		.map(item => item.colorIndex)
+		.filter((index): index is number => typeof index === 'number')
+	return Math.max(indices.length ? Math.max(...indices) + 1 : 0, state.order?.length ?? 0)
 }
 
 function endStatus(isAborted: boolean, reason: string): AgentStatusView {
@@ -101,9 +119,9 @@ function endStatus(isAborted: boolean, reason: string): AgentStatusView {
 function startTurn(state: CrewState, ev: Extract<CrewEvent, { kind: 'turnStart' }>): CrewState {
 	if (ev.agentId) {
 		const found = state.agents[ev.agentId] ?? newAgent(ev.agentId, ev.at, state.known[ev.agentId] ?? {})
-		const { agent, nextColor } = withColor(state, found)
+		const { agent, nextColor, known } = withColor(state, found)
 		const { endedAt: _ended, ...rest } = agent
-		return { ...withAgent(state, { ...rest, status: 'running' }), order: withOrder(state, ev.agentId), nextColor }
+		return { ...withAgent(state, { ...rest, status: 'running' }), order: withOrder(state, ev.agentId), nextColor, known }
 	}
 	if (ev.text === '' && state.turn) {
 		const { endedAt: _turnEnded, ...turn } = state.turn
@@ -163,10 +181,10 @@ function addStep(state: CrewState, ev: Extract<CrewEvent, { kind: 'step' }>): Cr
 	const colored = withColor(state, state.agents[id] ?? newAgent(id, ev.at, state.known[id] ?? {}))
 	const existing = colored.agent
 	const order = withOrder(state, id)
-	const nextColor = colored.nextColor
+	const { nextColor, known } = colored
 	const effort = ev.effort ?? existing.effort
 	if (!ev.usage) {
-		return { ...withAgent(state, { ...existing, model: ev.model, ...(effort ? { effort } : {}) }), order, nextColor }
+		return { ...withAgent(state, { ...existing, model: ev.model, ...(effort ? { effort } : {}) }), order, nextColor, known }
 	}
 	// Only a step that carries usage proves the agent is alive again.
 	const previous = revive(existing)
@@ -185,6 +203,7 @@ function addStep(state: CrewState, ev: Extract<CrewEvent, { kind: 'step' }>): Cr
 		...withAgent(state, agent),
 		order,
 		nextColor,
+		known,
 		sessionByModel: { ...state.sessionByModel, [model]: addUsage(state.sessionByModel[model] ?? ZERO, ev.usage) },
 		turnByModel: { ...state.turnByModel, [model]: addUsage(state.turnByModel[model] ?? ZERO, ev.usage) }
 	}
@@ -245,7 +264,9 @@ function applyStatuses(state: CrewState, ev: Extract<CrewEvent, { kind: 'statuse
 export function reduce(state: CrewState, ev: CrewEvent): CrewState {
 	// State saved by an older build may lack keys added since; a current one passes through as itself.
 	const isCurrent = Object.keys(EMPTY_STATE).every(key => key in state)
-	const s: CrewState = isCurrent ? state : { ...EMPTY_STATE, ...state }
+	const s: CrewState = isCurrent
+		? state
+		: { ...EMPTY_STATE, ...state, nextColor: 'nextColor' in state ? state.nextColor : seedNextColor(state) }
 	switch (ev.kind) {
 		case 'turnStart':
 			return startTurn(s, ev)

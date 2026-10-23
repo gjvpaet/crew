@@ -20,7 +20,7 @@ const TONE: Record<Tone, string> = { running: 'claude', waiting: 'inactive', don
 const PIP_PX = 32
 const BAR_PX = 6
 // A card's frame, its padding, the 8-cell sprite and the gap after it: what the text bar leaves to the rest.
-const CARD_CHROME = 14
+const CARD_CHROME = 13
 
 const cellProps = (cell: SpriteCell) => ({
 	...(cell.fg ? { color: cell.fg } : {}),
@@ -42,7 +42,7 @@ export function registerPanel(on: On) {
 		const now = await $.clock.now()
 		const barColumns = Math.max(8, e.props.bodyColumns - CARD_CHROME)
 		const barPx = clamp(barColumns * 7, 120, 320)
-		const view = panelView(state, prefs, now, barColumns, open)
+		const view = panelView(state, prefs, now, barColumns, open, { sprites: !Svg })
 
 		const card = (label: string, value: string) => (
 			<Box key={`card-${label}`} flexDirection="column" borderStyle="round" paddingX={1}>
@@ -98,16 +98,19 @@ export function registerPanel(on: On) {
 				{mascot(row)}
 				<Box flexDirection="column" flexGrow={1}>
 					<Box flexDirection="row" justifyContent="space-between" gap={1}>
-						<Text weight="semibold" wrap="truncate-end">
-							{row.title}
-						</Text>
-						<Box flexDirection="row" gap={1}>
+						{/* The title gives way first; the time and the badge keep their width in a narrow pane. */}
+						<Box flexShrink={1}>
+							<Text weight="semibold" wrap="truncate-end">
+								{row.title}
+							</Text>
+						</Box>
+						<Box flexDirection="row" gap={1} flexShrink={0}>
 							<Text dimColor tabular>
 								{row.elapsed}
 							</Text>
-							{(row.mark || row.note) && (
+							{row.badge && (
 								<Text color={TONE[row.tone]} wrap="truncate-end">
-									{row.mark || row.note}
+									{row.badge}
 								</Text>
 							)}
 						</Box>
@@ -117,7 +120,7 @@ export function registerPanel(on: On) {
 							<Text {...(row.effortTone ? { color: row.effortTone } : { dimColor: true })}>{row.effort}</Text>
 						)}
 						<Text dimColor wrap="truncate-end">
-							{`${row.effort ? '· ' : ''}${row.model} · ${row.usageText}`}
+							{`${row.effort ? '· ' : ''}${row.model} · ${row.usageText}${row.aside ? ` · ${row.aside}` : ''}`}
 						</Text>
 					</Box>
 					{row.steps && <Text wrap="truncate-end">{row.steps}</Text>}

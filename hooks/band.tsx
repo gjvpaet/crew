@@ -13,8 +13,8 @@ const mascots = atom({ plugin: 'crew', key: 'mascots' } as const, {} as MascotPr
 
 const DOT = { running: 'claude', done: 'success', aborted: 'error' } as const
 
-// The SVG bar's look on desktop, vscode and mobile: a lilac fill under a purple pill.
-const BAR = { width: 160, height: 18, fill: '#AFA9EC', pillBg: '#534AB7', pillFg: '#EEEDFE' }
+// The SVG bar's look on desktop, vscode and mobile: a violet fill (readable on the light track) and a purple pill.
+const BAR = { width: 200, height: 18, fill: '#7F77DD', pillBg: '#534AB7', pillFg: '#EEEDFE' }
 const MINI_PIP_PX = 16
 
 // `onViewport` hears whether the surface docks a pane beside the transcript, each time the band is drawn where it said.
