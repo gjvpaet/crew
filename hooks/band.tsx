@@ -3,7 +3,8 @@ import type { On } from 'claude-code'
 
 import type { MascotPrefs } from '../types'
 import { bandBarSvg, pipHeight, pipSvg } from './svg'
-import { EMPTY_STATE, selectProgress, selectRunning } from './tracker'
+import { PALETTE } from './sprite'
+import { EMPTY_STATE, MAIN, selectProgress, selectRunning } from './tracker'
 import { bandLine } from './view'
 
 // The engine's scan follows state refs only through consts of the same file, so each file declares its own.
@@ -12,6 +13,8 @@ const isBandHidden = atom({ plugin: 'crew', key: 'isBandHidden' } as const, fals
 const mascots = atom({ plugin: 'crew', key: 'mascots' } as const, {} as MascotPrefs)
 
 const DOT = { running: 'claude', done: 'success', aborted: 'error' } as const
+
+const FAILED = new Set(['failed', 'killed', 'stopped'])
 
 // The SVG bar's look on desktop, vscode and mobile: a violet fill (readable on the light track) and a purple pill.
 const BAR = { width: 200, height: 18, fill: '#7F77DD', pillBg: '#534AB7', pillFg: '#EEEDFE' }
@@ -37,6 +40,20 @@ export function registerBand(on: On, onViewport: (isFullscreen: boolean) => void
 			const { Svg } = elements
 			const prefs = await read($, mascots)
 			const isAnyRunning = selectRunning(state) > 0
+			const main = state.agents[MAIN]
+			// With no sub-agent, Main is the one at work: its own Pip, moving while its turn runs.
+			const mainPose = main?.status === 'running' ? 'running' : FAILED.has(main?.status ?? 'completed') ? 'stopped' : 'still'
+			const mini = line.runningLabel
+				? {
+						source: pipSvg('developer', prefs, MINI_PIP_PX, { pose: isAnyRunning ? 'running' : 'still' }),
+						alt: 'developer mascot',
+						isMoving: isAnyRunning
+					}
+				: {
+						source: pipSvg(main?.role ?? 'plain', prefs, MINI_PIP_PX, { species: 'pip', body: PALETTE.body, pose: mainPose }),
+						alt: `Pip the main agent mascot, ${mainPose}`,
+						isMoving: mainPose === 'running'
+					}
 			return (
 				<Box flexDirection="row" gap={1} alignItems="center">
 					<Text color={DOT[line.tone]}>●</Text>
@@ -60,23 +77,19 @@ export function registerBand(on: On, onViewport: (isFullscreen: boolean) => void
 						/>
 					</Box>
 					<Text tabular>{line.percent}</Text>
-					{line.runningLabel && (
-						<Box alignSelf="center">
-							<Svg
-								source={pipSvg('developer', prefs, MINI_PIP_PX, { pose: isAnyRunning ? 'running' : 'still' })}
-								alt="developer mascot"
-								width={MINI_PIP_PX}
-								height={pipHeight(MINI_PIP_PX)}
-								// It moves while any sub-agent works, and rests once none do.
-								isInteractive={isAnyRunning}
-							/>
-						</Box>
-					)}
-					{line.runningLabel && (
-						<Text dimColor tabular>
-							{line.runningLabel}
-						</Text>
-					)}
+					<Box alignSelf="center">
+						<Svg
+							source={mini.source}
+							alt={mini.alt}
+							width={MINI_PIP_PX}
+							height={pipHeight(MINI_PIP_PX)}
+							// It moves while whoever it stands for is at work, and rests once they are not.
+							isInteractive={mini.isMoving}
+						/>
+					</Box>
+					<Text dimColor tabular>
+						{line.agentLabel}
+					</Text>
 					<Button key="hide" label="×" plain onPress={() => update($, isBandHidden, () => true)} />
 				</Box>
 			)
@@ -96,11 +109,9 @@ export function registerBand(on: On, onViewport: (isFullscreen: boolean) => void
 					{line.pill}
 				</Text>
 				<Text tabular>{line.percent}</Text>
-				{line.runningLabel && (
-					<Text dimColor tabular>
-						{line.runningLabel}
-					</Text>
-				)}
+				<Text dimColor tabular>
+					{line.agentLabel}
+				</Text>
 				<Button key="hide" label="×" plain onPress={() => update($, isBandHidden, () => true)} />
 			</Box>
 		)

@@ -23,6 +23,8 @@ export type BandLine = {
 	percent: string
 	// '' when the turn has no sub-agents, so the band leaves the count out.
 	runningLabel: string
+	// Who is at work, beside the band's mini Pip: the running count, or `Main` while it works with no sub-agent.
+	agentLabel: string
 	tone: 'running' | 'done' | 'aborted'
 }
 
@@ -30,16 +32,26 @@ export function bandLine(state: CrewState, progress: Progress, columns: number):
 	const pill = `${progress.source === 'tasks' ? 'Tasks' : 'Agents'} ${progress.done}/${progress.total}`
 	const percent = fmtPercent(progress.fraction)
 	const runningLabel = state.order.length > 0 ? `${selectRunning(state)} running` : ''
-	// Segments: dot, label, bar, pill, percent, [running], hide button — one cell of gap between each.
-	const segments = runningLabel ? 7 : 6
-	const fixed = 1 + pill.length + percent.length + runningLabel.length + 1 + (segments - 1)
+	const agentLabel = runningLabel || 'Main'
+	// Segments: dot, label, bar, pill, percent, who is at work, hide button — one cell of gap between each.
+	const segments = 7
+	const fixed = 1 + pill.length + percent.length + agentLabel.length + 1 + (segments - 1)
 	const barWidth = clamp(Math.floor((columns - fixed) / 3), 6, 24)
 	// A label stored before envelopes were filtered can still start with `<`: never draw one.
 	const stored = state.turn?.label ?? ''
 	const label = truncate(stored && !stored.startsWith('<') ? stored : 'Working', Math.max(6, columns - fixed - barWidth))
 	const filled = Math.round(clamp(progress.fraction, 0, 1) * barWidth)
 	const tone = state.turn?.isAborted ? 'aborted' : state.turn?.endedAt ? 'done' : 'running'
-	return { label, filled: '█'.repeat(filled), empty: '░'.repeat(barWidth - filled), pill, percent, runningLabel, tone }
+	return {
+		label,
+		filled: '█'.repeat(filled),
+		empty: '░'.repeat(barWidth - filled),
+		pill,
+		percent,
+		runningLabel,
+		agentLabel,
+		tone
+	}
 }
 
 export type Tone = 'running' | 'waiting' | 'done' | 'failed'

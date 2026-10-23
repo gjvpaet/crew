@@ -29,6 +29,7 @@ test('the band line fits its width', async () => {
 	expect(wide.pill).toBe('Agents 1/3')
 	expect(wide.percent).toBe('33%')
 	expect(wide.runningLabel).toBe('2 running')
+	expect(wide.agentLabel).toBe('2 running')
 	expect(wide.label).toBe('Build the launch kit for our new cold brew')
 	const narrow = bandLine(STATE, progress, 40)
 	expect(narrow.label.endsWith('…')).toBe(true)
@@ -44,6 +45,8 @@ test('the running count is hidden when the turn has no sub-agents', async () => 
 	if (!progress) throw new Error('expected progress')
 	expect(progress.source).toBe('tasks')
 	expect(bandLine(tasksOnly, progress, 100).runningLabel).toBe('')
+	// With no sub-agent, the agent at work is Main: the band names it.
+	expect(bandLine(tasksOnly, progress, 100).agentLabel).toBe('Main')
 })
 
 test('the running count reads 0 running once every sub-agent has ended', async () => {

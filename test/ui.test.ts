@@ -496,3 +496,58 @@ test("a finished agent's Pip is a still picture", async ($, on) => {
 	}
 	await ui.unmount()
 })
+
+// A turn where Main plans on its own: a task list, no sub-agent.
+async function startPlanning($: any, on: any) {
+	mock.clock(on, { now: 1000 })
+	mock.store(on)
+	on('command.register', () => ({ value: { command: 'crew' } }))
+	on('tool.register', () => ({ value: { tool: 'mcp__crew__set_mascot' } }))
+	on('session.start', (_: unknown, e: any) => ({ cwd: e.cwd }))
+	on('turn.start', (_: unknown, e: any) => ({ turnId: e.turnId }))
+	on('turn.complete', () => ({ text: '' }))
+	on('tool.call', () => ({ result: {} }))
+	on('ui.render', (_$: any, e: any) => {
+		const { Box } = _$.ui.resolve(e)
+		return h(Box, null)
+	})
+	await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+	await $.turn.start({ text: 'Plan the updates tab', turnId: 't1' })
+	await $.tool.call({
+		tool: 'mcp__ccd_turn__update_plan',
+		items: [
+			{ content: 'Read the design', status: 'completed' },
+			{ content: 'Map the design onto the card', status: 'in_progress' },
+			{ content: 'Write the plan', status: 'pending' }
+		]
+	} as any)
+}
+
+test('while Main plans alone the band shows Main and its Pip, hopping', async ($, on) => {
+	await startPlanning($, on)
+	const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+	expect(await svgs(ui, /Tasks 1\/3/)).toHaveLength(1)
+	expect((await ui.find({ type: 'Text', text: /^Main$/ }))?.text).toBe('Main')
+	expect(await ui.find({ type: 'Text', text: /running/ })).toBeUndefined()
+	const [pip] = await svgs(ui, /main agent/)
+	expect(pip).toBeDefined()
+	// Main's own blue, and moving while its turn runs.
+	expect(String(pip?.props.source)).toContain('fill="#7C9CF5"')
+	expect(pip?.props.isInteractive).toBe(true)
+	expect(String(pip?.props.source)).toContain('<animateTransform')
+	await ui.unmount()
+	const terminal = await $.ui.mount({ ...BAND, surface: 'terminal' })
+	expect((await terminal.find({ type: 'Text', text: /^Main$/ }))?.text).toBe('Main')
+	await terminal.unmount()
+})
+
+test("once Main's turn ends, its band Pip rests", async ($, on) => {
+	await startPlanning($, on)
+	await $.turn.complete({ turnId: 't1', answer: 'x', durationMs: 1, isAborted: false, reason: 'answer' } as any)
+	const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+	const [pip] = await svgs(ui, /main agent/)
+	expect(pip).toBeDefined()
+	expect(pip?.props.isInteractive).toBeFalsy()
+	expect(String(pip?.props.source)).not.toContain('<animate')
+	await ui.unmount()
+})
