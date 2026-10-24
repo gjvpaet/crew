@@ -272,3 +272,33 @@ test('a paused Pip sleeps: three z\'s rise from its head in turn and fade', asyn
 		expect(pipSvg('plain', {}, 32, { species: 'mochi', body: '#7F77DD', pose })).not.toContain('class="z"')
 	}
 })
+
+test('a finished mascot holds a chequered goal flag inside its box; no other pose does', async () => {
+	const look = { species: 'mochi' as const, body: '#1D9E75' }
+	const done = pipSvg('plain', {}, 32, { ...look, pose: 'still' })
+	expect(isWellFormed(done)).toBe(true)
+	expect(done).toContain('class="flag"')
+	expect(done).not.toContain('<animate')
+	const flag = done.slice(done.indexOf('class="flag"'))
+	const cells = rects(flag).map(tag => ({
+		x: Number(attr(tag, 'x')),
+		y: Number(attr(tag, 'y')),
+		width: Number(attr(tag, 'width')),
+		height: Number(attr(tag, 'height')),
+		fill: attr(tag, 'fill')
+	}))
+	// Light and dark squares both, so it reads as chequered on either background, and a hand in the body colour.
+	expect(cells.some(cell => cell.fill === '#F4F4F2')).toBe(true)
+	expect(cells.some(cell => cell.fill === '#2C2C2A')).toBe(true)
+	expect(cells.some(cell => cell.fill === '#1D9E75')).toBe(true)
+	// All of it inside the 10×11 box (x from -1, y from -2), so nothing is clipped.
+	for (const cell of cells) {
+		expect(cell.x).toBeGreaterThanOrEqual(-1)
+		expect(cell.y).toBeGreaterThanOrEqual(-2)
+		expect(cell.x + cell.width).toBeLessThanOrEqual(9)
+		expect(cell.y + cell.height).toBeLessThanOrEqual(9)
+	}
+	for (const pose of ['running', 'paused', 'stopped'] as const) {
+		expect(pipSvg('plain', {}, 32, { ...look, pose })).not.toContain('class="flag"')
+	}
+})

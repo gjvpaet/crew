@@ -87,10 +87,50 @@ function sleepSvg(): string {
 	}).join('')
 }
 
+// Finished: a chequered goal flag, held in the free column to the right of the sprite. The pole rises from the hand
+// into the headroom above, where the cloth flies back over the head; light and dark squares read on either
+// background. Still, like the rest of a finished mascot.
+const FLAG = { pole: '#9A9AA0', light: '#F4F4F2', dark: '#2C2C2A' }
+const POLE = { x: 8.2, width: 0.5, top: -2, bottom: 7.5 }
+const CLOTH = { columns: 4, rows: 3, cell: 0.66 }
+const HAND_Y = 5
+
+function flagSvg(hand: string, reach: number): string {
+	const right = POLE.x
+	const left = right - CLOTH.columns * CLOTH.cell
+	const squares = Array.from({ length: CLOTH.rows }, (_, row) =>
+		Array.from({ length: CLOTH.columns }, (_, column) => {
+			const fill = (row + column) % 2 === 0 ? FLAG.dark : FLAG.light
+			const x = num(left + column * CLOTH.cell)
+			const y = num(POLE.top + row * CLOTH.cell)
+			return `<rect x="${x}" y="${y}" width="${CLOTH.cell}" height="${CLOTH.cell}" fill="${fill}"/>`
+		}).join('')
+	).join('')
+	const pole = `<rect x="${POLE.x}" y="${POLE.top}" width="${POLE.width}" height="${num(POLE.bottom - POLE.top)}" fill="${FLAG.pole}"/>`
+	// The hand closes round the pole, a pixel of the body's colour across it, with an arm back to the body's edge.
+	const gripX = POLE.x - 0.25
+	const grip = `<rect x="${num(gripX)}" y="${HAND_Y}" width="1" height="1" fill="${hand}"/>`
+	const arm =
+		reach < gripX ? `<rect x="${reach}" y="${num(HAND_Y + 0.25)}" width="${num(gripX - reach)}" height="0.5" fill="${hand}"/>` : ''
+	return `<g class="flag">${pole}${squares}${arm}${grip}</g>`
+}
+
+// Where the body ends on the hand's row: the arm reaches out from there.
+const bodyEdge = (pixels: readonly { x: number; y: number }[]) =>
+	Math.max(0, ...pixels.filter(pixel => pixel.y === HAND_Y).map(pixel => pixel.x + 1))
+
+// The colour most of the body is drawn in: the flag's hand matches it.
+function bodyColour(pixels: readonly { fill: string; eye?: string }[]): string {
+	const counts = new Map<string, number>()
+	for (const { fill, eye } of pixels) if (!eye) counts.set(fill, (counts.get(fill) ?? 0) + 1)
+	return [...counts].sort((a, b) => b[1] - a[1])[0]?.[0] ?? FLAG.pole
+}
+
 function drawPip(role: Role, prefs: MascotPrefs, size: number, look: Look): string {
 	let body = ''
 	let eyes = ''
-	for (const { x, y, fill, eye, under } of spritePixels(role, prefs, look)) {
+	const pixels = spritePixels(role, prefs, look)
+	for (const { x, y, fill, eye, under } of pixels) {
 		if (!eye) {
 			body += pixelRect(x, y, fill)
 			continue
@@ -109,7 +149,13 @@ function drawPip(role: Role, prefs: MascotPrefs, size: number, look: Look): stri
 		? `<g>${HOP}<g transform="translate(4 8)"><g>${SQUASH}<g transform="translate(-4 -8)">${drawn}</g></g></g></g>`
 		: `<g>${drawn}</g>`
 	const faded =
-		look.pose === 'stopped' ? `<g opacity="0.45">${sprite}</g>` : look.pose === 'paused' ? sprite + sleepSvg() : sprite
+		look.pose === 'stopped'
+			? `<g opacity="0.45">${sprite}</g>`
+			: look.pose === 'paused'
+				? sprite + sleepSvg()
+				: look.pose === 'still'
+					? sprite + flagSvg(bodyColour(pixels), bodyEdge(pixels))
+					: sprite
 	return `<svg xmlns="${XMLNS}" viewBox="${VIEW.x} ${VIEW.y} ${VIEW.width} ${VIEW.height}" width="${num(pipWidth(size))}" height="${num(pipHeight(size))}" shape-rendering="crispEdges">${faded}</svg>`
 }
 

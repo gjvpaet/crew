@@ -92,10 +92,10 @@ A 16 px Pip names who is at work: a developer Pip before `N running` while there
   |---|---|---|---|
   | Running | `running` | Hops a whole sprite pixel on a 0.7s beat, stretching on take-off and squashing on landing about its feet, and blinks (SMIL), drawn with `isInteractive` so it plays | Eyes glance right on odd seconds |
   | Waiting, pending, idle, Main waiting on agents | `paused` | Asleep: body still, eyes shut (a lid line), three pixel Z's of growing size rising from its head in turn and fading (SMIL, `isInteractive`) | Still, eyes shut |
-  | Finished | `still` | Still | Still |
+  | Finished | `still` | Still, holding a chequered goal flag: a grey pole in the free column right of the sprite, rising into the headroom where a 4×3 chequered cloth flies back over the head, gripped by a hand and arm in the body's colour | Still (no flag: the half-block sprite has no spare column) |
   | Stopped, failed, killed | `stopped` | Still, grey, 45% opacity | Still, grey |
 
-  `still` and `stopped` are plain images. The SVG frames the 8×8 sprite with a pixel either side and two rows above (`viewBox -1 -2 10 11`; `pipWidth` and `pipHeight` are 10/8 and 11/8 of the sprite's size, 40×44 in the panel and 20×22 in the band) so the hop never clips a hat and the Z's rise clear of the head, and its markup is cached per look so a redraw leaves the animation where it is. The band's mini Pip moves while any sub-agent runs.
+  `still` and `stopped` are plain images. The SVG frames the 8×8 sprite with a pixel either side and two rows above (`viewBox -1 -2 10 11`; `pipWidth` and `pipHeight` are 10/8 and 11/8 of the sprite's size, 40×44 in the panel and 20×22 in the band) so the hop never clips a hat, the Z's rise clear of the head and a finished mascot's flag fits, and its markup is cached per look so a redraw leaves the animation where it is. The band's mini Pip moves while any sub-agent runs.
 - Accessory by role:
 
   | Role | Accessory |
