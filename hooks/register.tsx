@@ -4,7 +4,7 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 import type { AgentStatusView, MascotPrefs } from '../types'
 import { registerBand } from './band'
 import { SET_MASCOT_SPEC, SET_MASCOT_TOOL, applyMascotChange, parseMascotInput, sanitizeMascots } from './mascot'
-import { openPane, registerPanel, syncPaneShown } from './panel'
+import { isMoving, openPane, registerPanel, syncPaneShown } from './panel'
 import { TASK_TOOLS } from './tasks'
 import { EMPTY_STATE, isPulsing, isTicking, reduce, type CrewEvent } from './tracker'
 
@@ -15,10 +15,12 @@ const mascots = atom({ plugin: 'crew', key: 'mascots' } as const, {} as MascotPr
 const hasAutoOpened = atom({ plugin: 'crew', key: 'hasAutoOpened' } as const, false)
 const groupOpen = atom({ plugin: 'crew', key: 'groupOpen' } as const, {} as Record<string, boolean>)
 
-// The clock beats five times a second. While an agent runs every beat redraws, so its card border breathes;
-// otherwise only every fifth does, once a second, for the elapsed times.
-const BEAT_MS = 200
-const BEATS_PER_SECOND = 5
+// The clock beats ten times a second. While a card moves between groups every beat redraws, so its slide steps
+// along; while an agent runs every second beat does, so its card border breathes; otherwise once a second, for the
+// elapsed times.
+const BEAT_MS = 100
+const BEATS_PER_SECOND = 10
+const BEATS_PER_PULSE = 2
 
 // Sub-agents keep no task list of their own unless asked, which leaves their bars nothing to measure. Each one is
 // asked, after its task, to keep a short one: Crew reads it off the task-list tool calls as the agent's steps.
@@ -60,10 +62,14 @@ async function dropFinishedFold($: EngineInterface) {
 	await update($, groupOpen, ({ Finished: _dropped, ...rest } = {}) => rest)
 }
 
-// Redraw the pane and band once a second while a clock on them is counting.
+// Redraw the pane and band at the rate what is on them needs: a move, a breathing border, or a counting clock.
 async function tick($: EngineInterface, beat: number) {
 	const state = await read($, model)
-	if (isPulsing(state) || (beat % BEATS_PER_SECOND === 0 && isTicking(state))) $.ui.invalidate('ui.render')
+	const isDue =
+		isMoving(await $.clock.now()) ||
+		(beat % BEATS_PER_PULSE === 0 && isPulsing(state)) ||
+		(beat % BEATS_PER_SECOND === 0 && isTicking(state))
+	if (isDue) $.ui.invalidate('ui.render')
 }
 
 // The first spawn of a session opens the pane only where it would be a sidebar; elsewhere it says how to open it.

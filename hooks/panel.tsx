@@ -5,7 +5,19 @@ import type { MascotPrefs } from '../types'
 import type { Species, SpriteCell } from './sprite'
 import { barSvg, pipHeight, pipSvg, pipWidth } from './svg'
 import { EMPTY_STATE } from './tracker'
-import { panelView, pulseColor, toggleGroup, type RowView, type Tone } from './view'
+import {
+	MOVE_MS,
+	motionView,
+	panelView,
+	pulseColor,
+	toggleGroup,
+	trackMoves,
+	type Move,
+	type Placement,
+	type RowView,
+	type Tone,
+	type Trail
+} from './view'
 
 export const PANE = 'crew'
 
@@ -33,6 +45,20 @@ const BAR_PX = 6
 // mark (`12:34 ✗ stopped` at most) and the gap before it: what the terminal's text bar leaves to the rest.
 const CARD_CHROME = 13
 const SIDE_COLUMNS = 16
+
+// Where each card sat at the last drawing and the moves still playing, kept in the module: a reload starts them
+// over, which only skips a move. A drawing after a long gap (the pane was closed) starts afresh rather than
+// playing every change it missed.
+let placement: Placement = {}
+let moves: Move[] = []
+let drawnAt = 0
+const STALE_MS = 2000
+
+// While a move plays the ticker redraws every beat, so the slide steps along.
+export const isMoving = (now: number) => moves.some(move => now - move.at < MOVE_MS)
+
+// The note's grey fading out on a graphical surface; the terminal dims it instead.
+const fadeColor = (fade: number) => `rgba(136,135,128,${Math.max(0, fade)})`
 
 const cellProps = (cell: SpriteCell) => ({
 	...(cell.fg ? { color: cell.fg } : {}),
@@ -74,6 +100,10 @@ export function registerPanel(on: On) {
 		const now = await $.clock.now()
 		const barColumns = Math.max(8, e.props.bodyColumns - CARD_CHROME - SIDE_COLUMNS)
 		const view = panelView(state, prefs, now, barColumns, open, { sprites: !Svg })
+		if (now - drawnAt > STALE_MS) placement = {}
+		;({ placement, moves } = trackMoves(view, placement, moves, now))
+		drawnAt = now
+		const motion = motionView(view, moves, now)
 
 		const card = (label: string, value: string) => (
 			// width 0 + flexGrow 1: the three cards start from nothing and grow to equal thirds of the pane.
@@ -131,16 +161,25 @@ export function registerPanel(on: On) {
 				</Text>
 			)
 
-		const agentCard = (row: RowView) => (
+		const agentCard = (row: RowView) => {
+			const arrival = motion.arrivals[row.id]
+			// Just moved here: lit in its accent and sliding in from the right. Otherwise a running card's border breathes
+			// in its accent, and every other card keeps the surface's own border.
+			const border = arrival?.isLit
+				? { borderColor: row.accent }
+				: row.pulse === null
+					? {}
+					: { borderColor: pulseColor(row.accent, row.pulse, Svg ? 'graphical' : 'terminal') }
+			return (
 			<Box
 				key={`row-${row.id}`}
 				flexDirection="row"
 				gap={1}
 				borderStyle="round"
-				// A running card's border breathes in its accent; every other card keeps the surface's own border.
-				{...(row.pulse === null ? {} : { borderColor: pulseColor(row.accent, row.pulse, Svg ? 'graphical' : 'terminal') })}
+				{...border}
 				paddingX={1}
 				marginBottom={1}
+				marginLeft={arrival?.slide ?? 0}
 			>
 				{mascot(row)}
 				{/* width 0 + flexGrow 1: the text column takes what the mascot and the side column leave, and no more. */}
@@ -177,6 +216,22 @@ export function registerPanel(on: On) {
 				</Box>
 			</Box>
 		)
+		}
+
+		// Where a card left: its dot and where it went, drifting right a cell at a time as it fades.
+		const trail = (note: Trail) => (
+			<Box key={note.key} flexDirection="row" gap={1} marginLeft={note.drift} marginBottom={1}>
+				<Text color={note.accent}>●</Text>
+				<Text {...(Svg ? { color: fadeColor(note.fade) } : { dimColor: true })}>{`Moved to ${note.to}`}</Text>
+			</Box>
+		)
+
+		// Each note goes where its card was, or at the end once the group has fewer cards than that.
+		const withTrails = (cards: JSX.Element[], notes: Trail[]) => {
+			const out = [...cards]
+			for (const note of [...notes].sort((a, b) => a.index - b.index)) out.splice(Math.min(note.index, out.length), 0, trail(note))
+			return out
+		}
 
 		return (
 			<Box flexDirection="column">
@@ -191,15 +246,18 @@ export function registerPanel(on: On) {
 				<Text> </Text>
 				{view.main && agentCard(view.main)}
 				{view.isEmpty && <Text dimColor>No sub-agents yet. They show up here as soon as one starts.</Text>}
-				{view.groups.map(group => (
+				{motion.groups.map(group => (
 					<Box key={`section-${group.name}`} flexDirection="column">
-						<Button
-							key={`group-${group.name}`}
-							plain
-							label={`${group.isCollapsed ? '▸' : '▾'} ${group.name} · ${group.count}`}
-							onPress={() => toggle($, group.name)}
-						/>
-						{!group.isCollapsed && group.rows.map(agentCard)}
+						{/* A group a move emptied keeps only its note, with no header to fold. */}
+						{!group.isGhost && (
+							<Button
+								key={`group-${group.name}`}
+								plain
+								label={`${group.isCollapsed ? '▸' : '▾'} ${group.name} · ${group.count}`}
+								onPress={() => toggle($, group.name)}
+							/>
+						)}
+						{!group.isCollapsed && withTrails(group.rows.map(agentCard), group.trails)}
 					</Box>
 				))}
 				{view.planned.length > 0 && (

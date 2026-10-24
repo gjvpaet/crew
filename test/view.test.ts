@@ -2,7 +2,19 @@ import { expect, test } from 'claude-code/testing'
 
 import { PALETTE, SPECIES_ORDER } from '../hooks/sprite'
 import { EMPTY_STATE, reduce, selectProgress, type CrewEvent } from '../hooks/tracker'
-import { ACCENTS, COLLAPSE_AFTER, PULSE, bandLine, effortToneOf, panelView, pulseColor, toggleGroup } from '../hooks/view'
+import {
+	ACCENTS,
+	COLLAPSE_AFTER,
+	MOVE_MS,
+	PULSE,
+	bandLine,
+	effortToneOf,
+	motionView,
+	panelView,
+	pulseColor,
+	toggleGroup,
+	trackMoves
+} from '../hooks/view'
 
 const usage = { input_tokens: 1000, output_tokens: 500, cache_read_input_tokens: 10_000, cache_creation_input_tokens: 2000, model: 'claude-opus-5-5' }
 const spawn = (agentId: string, description: string): CrewEvent => ({
@@ -441,4 +453,45 @@ test('Planned lists the plan steps not started yet, numbered as in the plan', as
 	expect(panelView(STATE, {}, 30_000, 20, {}).planned).toEqual([])
 	const carried = reduce(PLANNED, { kind: 'turnStart', at: 40_000, turnId: 't2', text: 'Next thing', isPerson: true })
 	expect(panelView(carried, {}, 40_000, 20, {}).planned).toEqual([])
+})
+
+const groupOf = (name: string, ids: string[]) =>
+	({ name, count: ids.length, isCollapsed: false, isCollapsible: true, rows: ids.map(id => ({ id, title: `Agent ${id}`, accent: '#1D9E75' })) }) as any
+const viewOf = (...groups: any[]) => ({ groups }) as any
+
+test('an agent that lands in another group is a move, remembered for a moment', async () => {
+	const first = trackMoves(viewOf(groupOf('Running', ['a1', 'a2'])), {}, [], 1000)
+	// Seen for the first time is not a move.
+	expect(first.moves).toEqual([])
+	const second = trackMoves(viewOf(groupOf('Running', ['a2']), groupOf('Finished', ['a1'])), first.placement, first.moves, 2000)
+	expect(second.moves).toEqual([
+		{ id: 'a1', title: 'Agent a1', accent: '#1D9E75', from: 'Running', to: 'Finished', index: 0, at: 2000 }
+	])
+	// Nothing new, the move stays while it plays and is dropped once it has.
+	expect(trackMoves(viewOf(groupOf('Running', ['a2']), groupOf('Finished', ['a1'])), second.placement, second.moves, 2500).moves).toHaveLength(1)
+	expect(trackMoves(viewOf(groupOf('Running', ['a2']), groupOf('Finished', ['a1'])), second.placement, second.moves, 2000 + MOVE_MS).moves).toEqual([])
+})
+
+test('a move slides the card in from the right, lit, and leaves a fading note where it was', async () => {
+	const move = { id: 'a1', title: 'Agent a1', accent: '#1D9E75', from: 'Running', to: 'Finished', index: 0, at: 1000 }
+	// Running emptied: it comes back as a ghost holding only the note, in its place before Finished.
+	const view = viewOf(groupOf('Finished', ['a1']))
+	const at = (now: number) => motionView(view, [move], now)
+	const start = at(1000)
+	expect(start.groups.map((group: any) => [group.name, !!group.isGhost])).toEqual([
+		['Running', true],
+		['Finished', false]
+	])
+	expect(start.groups[0].trails).toEqual([{ key: 'trail-a1', accent: '#1D9E75', to: 'Finished', index: 0, drift: 0, fade: 1 }])
+	expect(start.arrivals.a1).toEqual({ slide: 3, isLit: true })
+	// It slides a cell left each frame until it sits in line; it stays lit for the whole move.
+	expect([1100, 1200, 1300, 1500].map(now => at(now).arrivals.a1?.slide)).toEqual([2, 1, 0, 0])
+	const late = at(1000 + MOVE_MS - 100)
+	expect(late.arrivals.a1?.isLit).toBe(true)
+	expect(late.groups[0].trails[0].fade).toBeLessThan(0.2)
+	expect(late.groups[0].trails[0].drift).toBeGreaterThan(0)
+	// Played out: no ghost, no note, nothing lit.
+	const done = at(1000 + MOVE_MS)
+	expect(done.groups.map((group: any) => group.name)).toEqual(['Finished'])
+	expect(done.arrivals).toEqual({})
 })

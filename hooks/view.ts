@@ -300,3 +300,71 @@ export function panelView(
 		isEmpty: state.order.length === 0
 	}
 }
+
+// An agent's card changing group plays a move: it lands in its new group at once, sliding in from the right with its
+// border lit in its colour, and a one-line note drifts off and fades where it was. The surface has no transitions,
+// so the slide is stepped, one cell a frame, at the redraw rate the ticker keeps up while a move plays.
+export const MOVE_MS = 1400
+const SLIDE_CELLS = [3, 2, 1]
+const FRAME_MS = 100
+const DRIFT_MS = 350
+const GROUP_ORDER = ['Running', 'Waiting', 'Finished', 'Failed']
+
+export type Move = { id: string; title: string; accent: string; from: string; to: string; index: number; at: number }
+export type Placement = Record<string, { group: string; index: number }>
+export type Trail = { key: string; accent: string; to: string; index: number; drift: number; fade: number }
+export type MotionGroup = GroupView & { trails: Trail[]; isGhost?: boolean }
+export type MotionView = { groups: MotionGroup[]; arrivals: Record<string, { slide: number; isLit: boolean }> }
+
+const isPlaying = (move: Move, now: number) => now - move.at < MOVE_MS
+
+// Where each card sits now against where it sat at the last drawing: one seen in another group is a move. A card
+// seen for the first time is not; a later move of the same card replaces the one still playing.
+export function trackMoves(
+	view: Pick<PanelView, 'groups'>,
+	last: Placement,
+	moves: readonly Move[],
+	now: number
+): { placement: Placement; moves: Move[] } {
+	const placement: Placement = {}
+	const started: Move[] = []
+	for (const group of view.groups) {
+		group.rows.forEach((row, index) => {
+			placement[row.id] = { group: group.name, index }
+			const before = last[row.id]
+			if (before && before.group !== group.name) {
+				started.push({ id: row.id, title: row.title, accent: row.accent, from: before.group, to: group.name, index: before.index, at: now })
+			}
+		})
+	}
+	const restarted = new Set(started.map(move => move.id))
+	return { placement, moves: [...moves.filter(move => isPlaying(move, now) && !restarted.has(move.id)), ...started] }
+}
+
+// The groups as drawn mid-move: each with the notes left in it, plus a ghost for a group the move emptied, in that
+// group's place, so its note still shows where the card was; and how each arriving card is drawn.
+export function motionView(view: Pick<PanelView, 'groups'>, moves: readonly Move[], now: number): MotionView {
+	const playing = moves.filter(move => isPlaying(move, now))
+	const groups: MotionGroup[] = view.groups.map(group => ({ ...group, trails: [] }))
+	for (const move of playing) {
+		let from = groups.find(group => group.name === move.from)
+		if (!from) {
+			from = { name: move.from, count: 0, rows: [], isCollapsed: false, isCollapsible: false, trails: [], isGhost: true }
+			const rank = GROUP_ORDER.indexOf(move.from)
+			const at = groups.findIndex(group => GROUP_ORDER.indexOf(group.name) > rank)
+			groups.splice(at < 0 ? groups.length : at, 0, from)
+		}
+		const elapsed = now - move.at
+		from.trails.push({
+			key: `trail-${move.id}`,
+			accent: move.accent,
+			to: move.to,
+			index: move.index,
+			drift: Math.floor(elapsed / DRIFT_MS),
+			fade: Math.round((1 - elapsed / MOVE_MS) * 100) / 100
+		})
+	}
+	const arrivals: MotionView['arrivals'] = {}
+	for (const move of playing) arrivals[move.id] = { slide: SLIDE_CELLS[Math.floor((now - move.at) / FRAME_MS)] ?? 0, isLit: true }
+	return { groups, arrivals }
+}
