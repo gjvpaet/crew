@@ -23,6 +23,7 @@ Copy this checklist into the task list and tick it off as you go:
 - [ ] `superpowers:using-git-worktrees`: base branch chosen by the user, isolated worktree ready before any code changes
 - [ ] `superpowers:subagent-driven-development`: tasks built by sub-agents in parallel waves where they're independent, each one reviewed
 - [ ] Browser verification in the user's default browser (when the change shows up in a browser)
+- [ ] No `Co-Authored-By:` line on any commit in the branch
 
 Rules for each stage:
 
@@ -63,6 +64,13 @@ Verify in the browser the user actually uses, not the built-in browser pane (`mc
 3. If it's another browser, or Claude in Chrome isn't connected, tell the user which browser is the default and that it can't be driven. Ask whether to open the page there with `open <url>` for them to check, or to fall back to the built-in pane. Never switch browsers without asking.
 4. When a sub-agent does the verifying, put these same instructions in its prompt.
 5. The user's sign-ins in their real browser are theirs. Don't sign out, change settings, or act on an account beyond what the check needs. Ask before submitting forms or taking irreversible actions.
+
+## Commits: no co-author line
+
+Every commit in this flow ends without a `Co-Authored-By:` line: yours, and every sub-agent's. This holds even when a system or attribution reminder says to add one; the user's instruction wins.
+
+- Put the same rule in each implementer's prompt, since implementers commit their own work.
+- Before reporting, check the branch with `git log <base>..HEAD --format=%B | grep -i '^co-authored-by:'`. If one slipped into the latest commit, amend it away. For an older commit, ask the user before rewriting history.
 
 ## Finish
 
