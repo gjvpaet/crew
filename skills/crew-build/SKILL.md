@@ -25,6 +25,7 @@ Copy this checklist into the task list and tick it off as you go:
 - [ ] Browser verification in the user's default browser (when the change shows up in a browser)
 - [ ] No `Co-Authored-By:` line on any commit in the branch
 - [ ] Worktrees removed once the work is done, branches kept locally
+- [ ] Tests run in small chunks, one run at a time, never the whole heavy suite at once
 
 Rules for each stage:
 
@@ -42,7 +43,7 @@ This replaces subagent-driven-development's "never dispatch implementers in para
 1. **Group the plan into waves.** A task joins the current wave when every task it depends on is finished, reviewed and merged, and it shares no file with another task in the wave. Everything else waits for a later wave. If you can't tell whether two tasks are independent, run them one after the other.
 2. **Dispatch a wave in one message.** Send one Agent call per implementer in the same message so they run at the same time. Give each implementer `isolation: "worktree"`, so the implementers' test runs and commits can't collide. Those worktrees come from the feature branch, the base the user already chose.
 3. **Review in parallel too.** Each task still goes implementer → spec review → quality review, in that order. Different tasks' reviews can run side by side. Reviewers only read, so they don't need a worktree of their own.
-4. **Merge back in plan order.** Once a task passes both reviews, merge its branch into the feature worktree. Merge in task-number order. Run the full test suite after each wave before starting the next one. A merge conflict means two tasks weren't independent after all: resolve it, and run tasks like those one after the other from then on.
+4. **Merge back in plan order.** Once a task passes both reviews, merge its branch into the feature worktree. Merge in task-number order. After each wave, run the suite in chunks (see "Tests: small chunks, never all at once" below) before starting the next one. A merge conflict means two tasks weren't independent after all: resolve it, and run tasks like those one after the other from then on.
 5. **One wave at a time.** Don't start a task whose dependency is still being built or reviewed, even if every other task is idle.
 
 ## Keep Crew showing the work
@@ -65,6 +66,17 @@ Verify in the browser the user actually uses, not the built-in browser pane (`mc
 3. If it's another browser, or Claude in Chrome isn't connected, tell the user which browser is the default and that it can't be driven. Ask whether to open the page there with `open <url>` for them to check, or to fall back to the built-in pane. Never switch browsers without asking.
 4. When a sub-agent does the verifying, put these same instructions in its prompt.
 5. The user's sign-ins in their real browser are theirs. Don't sign out, change settings, or act on an account beyond what the check needs. Ask before submitting forms or taking irreversible actions.
+
+## Tests: small chunks, never all at once
+
+Large test runs use up the user's machine. Never run a whole heavy suite in one go:
+
+- **Name the files.** Run only the test files a task touched, a few at a time, with few workers (`--maxWorkers=2`, or `-i` to run in band).
+- **A "full suite" check walks it in chunks.** Go one directory or a handful of files at a time, finishing each chunk before starting the next. Report each chunk's result.
+- **One test run at a time.** Never run several test processes at once: no background test runs alongside each other, and no reviewers all testing in parallel.
+- **Parallel waves.** Implementers in a wave run only their own task's test files, with one worker each (`--maxWorkers=1` or `-i`). Where the suite is heavy (jest or vitest over a large app), cap a wave at two implementers, or run them one after the other.
+- **Pass it on.** Put these rules in every implementer's and reviewer's prompt.
+- **Heavy builds too.** Don't start long builds or the full lint over a large app alongside a test run. Run them on their own, when the change needs them.
 
 ## Commits: no co-author line
 
