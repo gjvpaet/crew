@@ -24,6 +24,7 @@ Copy this checklist into the task list and tick it off as you go:
 - [ ] `superpowers:subagent-driven-development`: tasks built by sub-agents in parallel waves where they're independent, each one reviewed
 - [ ] Browser verification in the user's default browser (when the change shows up in a browser)
 - [ ] No `Co-Authored-By:` line on any commit in the branch
+- [ ] Worktrees removed once the work is done, branches kept locally
 
 Rules for each stage:
 
@@ -75,3 +76,12 @@ Every commit in this flow ends without a `Co-Authored-By:` line: yours, and ever
 ## Finish
 
 Once subagent-driven development finishes, it hands off to `superpowers:finishing-a-development-branch`. Report what was built, what was verified and where, and what wasn't. Commit or push only as those skills and the user allow.
+
+### Clean up the worktrees, keep the branches
+
+Once the work is done (finishing-a-development-branch has run and every change is committed), remove each worktree this run created, both the feature worktree and any implementer worktrees left from parallel waves. Keep every branch as a local branch. This replaces any option in that skill that deletes the branch.
+
+1. Run `git -C <worktree> status --porcelain`. If anything is uncommitted, stop and ask the user. Never pass `--force`.
+2. From the main checkout, not from inside the worktree, run `git worktree remove <worktree>`, then `git worktree prune`.
+3. Don't run `git branch -d` or `-D`. Check that `git branch --list <branch>` still lists the branch.
+4. Report each worktree removed and each branch kept, by name. Leave alone any worktree the run didn't create, and the one this session runs in.
