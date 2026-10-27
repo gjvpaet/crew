@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import { PALETTE, spriteCells, spriteGrid, spritePixels } from '../hooks/sprite'
-import { BAR_NATIVE_WIDTH, bandBarSvg, barSvg, escapeXml, pipHeight, pipSvg, pipWidth } from '../hooks/svg'
+import { BAND_NATIVE_WIDTH, BAR_NATIVE_WIDTH, bandBarSvg, barSvg, escapeXml, pipHeight, pipSvg, pipWidth } from '../hooks/svg'
 
 const rects = (svg: string) => svg.match(/<rect\b[^>]*>/g) ?? []
 const part = (svg: string, name: string) =>
@@ -107,80 +107,78 @@ test('the shimmer only steps right, one tick at a time, then wraps', async () =>
 	expect(sweep[0]).toBe(-30)
 })
 
-const BAND = { width: 200, height: 18, color: '#7F77DD', pill: 'Tasks 2/4', pillBg: '#534AB7', pillFg: '#EEEDFE', total: 4 }
-const pathsOf = (svg: string, name: string) => svg.match(new RegExp(`<path class="${name}"[^>]*>`, 'g')) ?? []
-// Every pixel's left edge in a path's `M x y h…` runs.
-const cellXs = (paths: string[]) =>
-	paths.flatMap(path => [...(attr(path, 'd') ?? '').matchAll(/M([\d.]+) /g)].map(match => Number(match[1])))
-const pillX = (svg: string) => Number(/class="pill-at" transform="translate\(([\d.]+) 0\)"/.exec(svg)?.[1])
+const BAND = { height: 18, color: '#7F77DD', pill: 'Tasks 2/4', pillBg: '#534AB7', pillFg: '#EEEDFE', total: 4 }
+const styleOf = (svg: string) => /<style>(.*)<\/style>/.exec(svg)?.[1] ?? ''
+const patternOf = (svg: string, id: string) => new RegExp(`<pattern id="${id}"[^>]*>(.*?)</pattern>`).exec(svg)?.[1] ?? ''
 
-test('bandBarSvg draws the pill inside the bar, its text escaped', async () => {
+test('bandBarSvg fills the room it is given, one unit to a CSS pixel, its pill text escaped', async () => {
 	const svg = bandBarSvg({ ...BAND, fraction: 0.25, pill: 'A & <B>' })
 	expect(isWellFormed(svg)).toBe(true)
-	expect(attr(part(svg, 'pill'), 'fill')).toBe('#534AB7')
+	// Wide markup takes the slot's width; a square viewBox met at the left keeps one unit to a pixel at any width.
+	expect(svg).toContain(`width="${BAND_NATIVE_WIDTH}" height="18" viewBox="0 0 18 18" preserveAspectRatio="xMinYMid meet"`)
+	expect(styleOf(svg)).toContain('.w{width:100vw}')
+	expect(attr(part(svg, 'pill-body'), 'fill')).toBe('#534AB7')
 	expect(svg).toContain('>A &amp; &lt;B&gt;</text>')
 	expect(svg).toContain('font-family="system-ui, sans-serif"')
-	expect(svg).toContain('fill="#EEEDFE"')
 	expect(svg).not.toContain('<B>')
 	expect(bandBarSvg({ ...BAND, fraction: 0.25, pill: 'A & <B>' })).toBe(svg)
 })
 
-test('the band pill rides the fill edge, kept inside the bar at either end', async () => {
-	const width = (svg: string) => Number(attr(part(svg, 'pill'), 'width'))
-	const half = bandBarSvg({ ...BAND, fraction: 0.5 })
-	expect(pillX(half) + width(half)).toBe(100)
-	expect(pillX(bandBarSvg({ ...BAND, fraction: 0 }))).toBe(2)
-	const full = bandBarSvg({ ...BAND, fraction: 1 })
-	expect(pillX(full) + width(full)).toBe(198)
+test('the fill and the pill follow the fraction of whatever width the bar is drawn at', async () => {
+	const style = styleOf(bandBarSvg({ ...BAND, fraction: 0.5 }))
+	expect(style).toContain('.fill{width:calc(100vw * 0.5)}')
+	// The pill's right end on the fill's edge, kept 2px inside the bar at either end.
+	const pillWidth = 'Tasks 2/4'.length * 10 * 0.6 + 14
+	expect(style).toContain(`.pill{transform:translateX(clamp(2px, calc(100vw * 0.5 - ${pillWidth}px), calc(100vw - ${pillWidth + 2}px)))}`)
 })
 
-test('the fill is a dither of pixels up to the edge, and none at 0%', async () => {
-	expect(pathsOf(bandBarSvg({ ...BAND, fraction: 0 }), 'done')).toHaveLength(0)
-	const done = cellXs(pathsOf(bandBarSvg({ ...BAND, fraction: 0.5 }), 'done'))
-	expect(done.length).toBeGreaterThan(40)
-	expect(Math.max(...done)).toBeLessThan(100)
-	expect(Math.min(...done)).toBeLessThan(6)
-	const full = cellXs(pathsOf(bandBarSvg({ ...BAND, fraction: 1 }), 'done'))
-	expect(Math.max(...full)).toBeGreaterThan(190)
+test('the fill is a dither of square pixels in a repeating tile', async () => {
+	const tile = patternOf(bandBarSvg({ ...BAND, fraction: 0.5 }), 'done')
+	const cells = [...tile.matchAll(/M([\d.]+) ([\d.]+)h([\d.]+)v([\d.]+)/g)].map(match => match.slice(1).map(Number))
+	expect(cells.length).toBeGreaterThan(100)
+	for (const [x, y, width, height] of cells) {
+		expect(width).toBe(height)
+		expect(x).toBeGreaterThanOrEqual(0)
+		expect(x + width).toBeLessThanOrEqual(96)
+		expect(y + height).toBeLessThanOrEqual(18)
+	}
+	expect(tile).toContain('fill-opacity="0.55"')
+	expect(tile).toContain('fill-opacity="1"')
 })
 
-test('while work runs a scanner sweeps from the fill edge all the way to the end', async () => {
-	expect(bandBarSvg({ ...BAND, fraction: 0.25 })).not.toContain('<animate')
+test('while work runs a scanner sweeps from the fill edge all the way past the end', async () => {
+	expect(styleOf(bandBarSvg({ ...BAND, fraction: 0.25 }))).not.toContain('@keyframes')
 	const svg = bandBarSvg({ ...BAND, fraction: 0.25, isSweeping: true })
-	const beams = pathsOf(svg, 'beam')
-	const xs = cellXs(beams)
-	// A pixel belongs to the side its centre is on: none of the beam's starts more than a pixel before the edge.
-	expect(Math.min(...xs)).toBeGreaterThan(47)
-	expect(Math.max(...xs)).toBeGreaterThan(190)
-	// Each column lights once a cycle, later the further along it is, and the cycle repeats.
-	const starts = (svg.match(/<animate [^>]*>/g) ?? []).map(tag => {
-		expect(tag).toContain('repeatCount="indefinite"')
-		const times = (attr(tag, 'keyTimes') ?? '').split(';').map(Number)
-		for (let i = 1; i < times.length; i++) expect(times[i]).toBeGreaterThanOrEqual(times[i - 1])
-		expect(times[0]).toBe(0)
-		expect(times[times.length - 1]).toBe(1)
-		return times[1]
-	})
-	expect(starts.length).toBe(beams.length)
-	for (let i = 1; i < starts.length; i++) expect(starts[i]).toBeGreaterThan(starts[i - 1])
+	const style = styleOf(svg)
+	expect(style).toContain('.beam{animation:sweep 2.4s linear infinite}')
+	expect(style).toContain('@keyframes sweep{0%{transform:translateX(calc(100vw * 0.25))}75%,100%{transform:translateX(calc(100vw + 26px))}}')
+	// Clipped to the stretch ahead of the fill, and only drawn over a denser pixel pattern.
+	expect(style).toContain('.ahead{x:calc(100vw * 0.25);width:100vw}')
+	expect(svg).toContain('<g clip-path="url(#ahead)"><g class="beam">')
+	expect(patternOf(svg, 'beam').length).toBeGreaterThan(0)
 	// A finished bar has nothing left to sweep.
-	expect(bandBarSvg({ ...BAND, fraction: 1, isSweeping: true })).not.toContain('<animate ')
+	expect(bandBarSvg({ ...BAND, fraction: 1, isSweeping: true })).not.toContain('class="beam"')
 })
 
-test('ticks mark each step boundary past the fill, unless the steps are too narrow to tell apart', async () => {
-	const ticks = (svg: string) => rects(svg).filter(tag => tag.includes('class="tick"')).map(tag => Number(attr(tag, 'x')))
-	expect(ticks(bandBarSvg({ ...BAND, fraction: 0.25 }))).toEqual([100, 150])
-	expect(ticks(bandBarSvg({ ...BAND, fraction: 0, total: 100 }))).toEqual([])
+test('ticks mark each step boundary past the fill, hidden where steps are too narrow to tell apart', async () => {
+	const svg = bandBarSvg({ ...BAND, fraction: 0.25 })
+	const style = styleOf(svg)
+	expect(rects(svg).filter(tag => tag.includes('class="tick')).length).toBe(2)
+	expect(style).toContain('.k0{x:calc(100vw * 0.5)}')
+	expect(style).toContain('.k1{x:calc(100vw * 0.75)}')
+	expect(style).toContain('@media (max-width:32px){.tick{display:none}}')
+	expect(rects(bandBarSvg({ ...BAND, fraction: 1 })).some(tag => tag.includes('class="tick'))).toBe(false)
 })
 
-test('a change of progress slides the pill over from where it was, once', async () => {
-	expect(bandBarSvg({ ...BAND, fraction: 0.5 })).not.toContain('<animateTransform')
-	const svg = bandBarSvg({ ...BAND, fraction: 0.5, from: 0.25 })
-	const slide = /<animateTransform [^>]*>/.exec(svg)?.[0]
-	const before = pillX(bandBarSvg({ ...BAND, fraction: 0.25 }))
-	expect(attr(slide, 'values')).toBe(`${before} 0;${pillX(svg)} 0`)
-	expect(attr(slide, 'fill')).toBe('freeze')
-	expect(slide).not.toContain('repeatCount')
+test('a change of progress slides the pill over from where it was, once, and grows the fill with it', async () => {
+	expect(styleOf(bandBarSvg({ ...BAND, fraction: 0.5 }))).not.toContain('@keyframes')
+	const style = styleOf(bandBarSvg({ ...BAND, fraction: 0.5, from: 0.25 }))
+	expect(style).toContain('.pill{animation:slide 0.7s cubic-bezier(0.2, 0.8, 0.3, 1) both}')
+	expect(style).toContain('@keyframes slide{from{transform:translateX(clamp(2px, calc(100vw * 0.25 - ')
+	expect(style).toContain('@keyframes grow{from{width:calc(100vw * 0.25)}}')
+	expect(style).not.toContain('infinite')
+	// Falling back, the pill slides but there is no fill to grow.
+	expect(styleOf(bandBarSvg({ ...BAND, fraction: 0.25, from: 0.5 }))).not.toContain('grow')
 })
 
 test('pipSvg gives the same drawing again and follows a prefs change', async () => {

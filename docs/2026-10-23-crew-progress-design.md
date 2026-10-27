@@ -38,12 +38,14 @@ From the Claude Code mods docs (overview, reference, events, interface, api):
 Every gap between segments comes from the row's `gap`, never from spaces inside a text (Desktop drops trailing spaces).
 Desktop lines the band up on the text baseline, where an image rests its bottom edge, so each band `Svg` sits in a Box with `alignSelf="center"`.
 
-That is the terminal. On desktop, vscode and mobile the bar is one 200×18 px SVG with the pill (`Tasks 3/5`) drawn inside it (purple pill, violet `#7F77DD`), after Savvy Progress:
+That is the terminal. On desktop, vscode and mobile the bar is one 18 px tall SVG with the pill (`Tasks 3/5`) drawn inside it (purple pill, violet `#7F77DD`), after Savvy Progress:
 
-- **Fill:** a dither of 3 px pixels at three strengths, the same pixels on every redraw, with a faint dusting of pixels on the track ahead of it.
+- **Width:** none of its own. Its Box grows into the room the row leaves it (`flexGrow` 1 from `width` 0, never under `minWidth` 25%), and the Svg has no `width`, so its 4000-wide markup is drawn at the slot's width. The drawing is never scaled: a square viewBox the bar's height, met at the left, keeps one unit to a CSS pixel, and the layout is CSS against `100vw`, the width it is drawn at, as an image or in its frame alike. So the pixels stay square, the ends round, and the fill, pill, ticks and sweep fit any width.
+
+- **Fill:** a dither of 3 px pixels at three strengths, a 32-column tile repeated by a `<pattern>`, the same pixels on every redraw, with a faint dusting of pixels on the track ahead of it.
 - **Ticks** mark each step boundary still ahead of the fill, left out when steps would be under 8 px apart.
-- **Pill:** rides the fill's edge, its right end on it, kept inside the bar at either end. When progress changes it slides over from where it was (0.7 s, eased) and the fill is uncovered in step with it; the band remembers the last fraction in the module, so a reload only skips one slide.
-- **Scanner:** while work runs (Main's turn or any sub-agent, `isPulsing`), a beam of pixels sweeps from the fill's edge all the way to the end, 1.8 s across and 0.6 s rest, each column on the same SMIL cycle so the markup stays unchanged between redraws. A finished bar has nothing to sweep.
+- **Pill:** rides the fill's edge, its right end on it, kept inside the bar at either end. When progress changes it slides over from where it was (a 0.7 s eased CSS animation) and the fill grows in step with it; the band remembers the last fraction in the module, so a reload only skips one slide.
+- **Scanner:** while work runs (Main's turn or any sub-agent, `isPulsing`), a beam sweeps from the fill's edge all the way to the end, 1.8 s across and 0.6 s rest: a window, brightest at its leading edge, moving over a denser pixel pattern, so the grid's pixels light as it passes. It is a CSS animation that doesn't change between redraws. A finished bar has nothing to sweep.
 - The Svg is interactive only while the scanner runs or the pill slides.
 
 A 16 px Pip names who is at work: a developer Pip before `N running` while there are sub-agents, or Main's own blue Pip before `Main` while it works alone (planning, say). Either moves while that work runs and rests once it stops. The terminal shows the same `N running` or `Main` text.

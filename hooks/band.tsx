@@ -19,7 +19,9 @@ const DOT = { running: 'claude', done: 'success', aborted: 'error' } as const
 const FAILED = new Set(['failed', 'killed', 'stopped'])
 
 // The SVG bar's look on desktop, vscode and mobile: a violet fill (readable on the light track) and a purple pill.
-const BAR = { width: 200, height: 18, fill: '#7F77DD', pillBg: '#534AB7', pillFg: '#EEEDFE' }
+// It has no width of its own: it grows into the row's free room, and never below a quarter of the row, so a long
+// title gives way before the bar does.
+const BAR = { minWidth: '25%', height: 18, fill: '#7F77DD', pillBg: '#534AB7', pillFg: '#EEEDFE' }
 const MINI_PIP_PX = 16
 // A change of progress slides the pill over for this long, then the bar is drawn still again.
 const SLIDE_MS = 900
@@ -77,11 +79,11 @@ export function registerBand(on: On, onViewport: (isFullscreen: boolean) => void
 					<Text weight="semibold" wrap="truncate-end">
 						{line.label}
 					</Text>
-					<Box alignSelf="center">
+					{/* The bar takes the room the rest of the row leaves it: width 0, then grow; it draws itself to that width. */}
+					<Box alignSelf="center" flexGrow={1} width={0} minWidth={BAR.minWidth}>
 						<Svg
 							source={bandBarSvg({
 								fraction: progress.fraction,
-								width: BAR.width,
 								height: BAR.height,
 								color: BAR.fill,
 								pill: line.pill,
@@ -92,7 +94,6 @@ export function registerBand(on: On, onViewport: (isFullscreen: boolean) => void
 								...(from === undefined ? {} : { from })
 							})}
 							alt={`${line.pill}, ${line.percent}`}
-							width={BAR.width}
 							height={BAR.height}
 							// A live frame while the scanner runs or the pill slides; otherwise a still image.
 							isInteractive={isSweeping || from !== undefined}

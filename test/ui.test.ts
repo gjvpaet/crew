@@ -78,7 +78,12 @@ test('on desktop the band draws its bar, pill and a mini Pip as SVG', async ($, 
 	expect(bar).toBeDefined()
 	expect(String(bar?.props.source)).toContain('>Agents 0/2</text>')
 	expect(bar?.props.height).toBe(18)
-	expect(bar?.props.width).toBe(200)
+	// No width of its own: its Box grows into the row's free room and the drawing fills it.
+	expect(bar?.props.width).toBeUndefined()
+	const boxes = await ui.findAll({ type: 'Box' })
+	const holder = boxes.find((box: any) => box.children.some((child: any) => child?.type === 'Svg' && /Agents 0\/2/.test(String(child.props.alt))))
+	expect(holder?.props.flexGrow).toBe(1)
+	expect(holder?.props.width).toBe(0)
 	// A fill dark enough to read against the track in light mode, not lilac.
 	expect(String(bar?.props.source)).toContain('fill="#7F77DD"')
 	expect(String(bar?.props.source)).not.toContain('#AFA9EC')
