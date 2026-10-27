@@ -26,6 +26,7 @@ Copy this checklist into the task list and tick it off as you go:
 - [ ] No `Co-Authored-By:` line on any commit in the branch
 - [ ] Worktrees removed once the work is done, branches kept locally
 - [ ] Tests run in small chunks, one run at a time, never the whole heavy suite at once
+- [ ] Every sub-agent prompt asks for a task list it ticks off as it goes
 
 Rules for each stage:
 
@@ -52,7 +53,11 @@ Crew draws from the task list and the sub-agents, so keep both honest:
 
 - Mirror the plan's tasks in the app's task list: `mcp__ccd_turn__update_plan` in the desktop app, `TodoWrite`/`TaskCreate` elsewhere. Advance it as each task finishes. Crew turns this into Main's progress bar and its Planned section.
 - Give each sub-agent a short, specific `description` (for example "Implement Task 3: parser"). Crew uses it as the card title, and with a wave running side by side, distinct titles are how the user tells the cards apart.
-- Crew asks every sub-agent to keep its own task list, which becomes that card's progress bar. Leave that note in their prompts.
+- **Every sub-agent tracks its work as tasks**, so its card in the Agents panel lists its progress: `N/M · <current step>` and a bar to scale. Write this into every sub-agent's prompt yourself (implementers, reviewers, verifiers), on top of the note Crew appends:
+  - Before any other work, write a task list of 3 to 7 short, concrete steps with the task-list tool (`TodoWrite`, or `TaskCreate` then `TaskUpdate`).
+  - Keep exactly one step in progress. Mark each one completed as soon as it's done, not in a batch at the end.
+  - Add a step if the work grows, and tick every step off before reporting back.
+  - A sub-agent that keeps no task list shows only a shimmer, with no steps. If a card shows only a shimmer, remind that sub-agent with `SendMessage`.
 
 ## Browser verification: the user's real default browser
 
