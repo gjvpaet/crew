@@ -24,7 +24,7 @@ Copy this checklist into the task list and tick it off as you go:
 - [ ] `superpowers:subagent-driven-development`: tasks built by sub-agents in parallel waves where they're independent, each one reviewed
 - [ ] Browser verification in the user's default browser (when the change shows up in a browser)
 - [ ] No `Co-Authored-By:` line on any commit in the branch
-- [ ] Worktrees removed once the work is done, branches kept locally
+- [ ] Worktrees removed once the work is done, their servers stopped, branches kept locally
 - [ ] Tests run in small chunks, one run at a time, never the whole heavy suite at once
 - [ ] Every sub-agent prompt asks for a task list it ticks off as it goes
 
@@ -99,6 +99,12 @@ Once subagent-driven development finishes, it hands off to `superpowers:finishin
 Once the work is done (finishing-a-development-branch has run and every change is committed), remove each worktree this run created, both the feature worktree and any implementer worktrees left from parallel waves. Keep every branch as a local branch. This replaces any option in that skill that deletes the branch.
 
 1. Run `git -C <worktree> status --porcelain`. If anything is uncommitted, stop and ask the user. Never pass `--force`.
-2. From the main checkout, not from inside the worktree, run `git worktree remove <worktree>`, then `git worktree prune`.
-3. Don't run `git branch -d` or `-D`. Check that `git branch --list <branch>` still lists the branch.
-4. Report each worktree removed and each branch kept, by name. Leave alone any worktree the run didn't create, and the one this session runs in.
+2. **Stop the servers running from it.** That means API and front-end dev servers, watchers, and anything else whose working folder is inside the worktree. Find them with:
+   ```bash
+   lsof -a -d cwd -F pn 2>/dev/null | awk '/^p/{p=substr($0,2)} /^n/{print p" "substr($0,2)}' | grep -F " <worktree>"
+   ```
+   - **How to stop them.** One you started through a tool goes down with that tool: `stop_terminal_tab` for a Terminal tab, `preview_stop` for a preview server, `TaskStop` for a background shell. The rest get `kill <pid>`, every listed PID, children included. Use `kill -9` only for one still running a few seconds later.
+   - **Only these servers.** Never stop servers running from the main checkout or another worktree, or shared services such as a database or Redis container.
+3. From the main checkout, not from inside the worktree, run `git worktree remove <worktree>`, then `git worktree prune`. Then run the lookup from step 2 again. Stop anything still listed: a server now running from a deleted folder.
+4. Don't run `git branch -d` or `-D`. Check that `git branch --list <branch>` still lists the branch.
+5. Report by name each worktree removed, each server stopped (with its port, if it had one) and each branch kept. Leave alone any worktree the run didn't create, and the one this session runs in.
