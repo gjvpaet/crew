@@ -756,3 +756,81 @@ test('a card that finishes lands in Finished lit and sliding in, leaving a fadin
 	expect((await ui.find({ key: 'row-a1' }))?.props.marginLeft).toBe(0)
 	expect((await ui.find({ key: 'row-a1' }))?.props.borderColor).toBeUndefined()
 })
+
+// Desktop drops a whole drawing (the pane reads "Nothing to show yet") at 2,000 nodes, 32 levels or 262,144
+// characters, Svg sources included. Counted the way it counts: each element and each text child a node, and every
+// string in props or children toward the characters.
+function desktopMeasure(node: any, depth = 1): { nodes: number; chars: number; depth: number } {
+	if (typeof node === 'string') return { nodes: 1, chars: node.length, depth }
+	const own = Object.values(node?.props ?? {}).reduce(
+		(sum: number, value: any) => sum + (typeof value === 'string' ? value.length : String(value ?? '').length),
+		0
+	)
+	return (node?.children ?? []).reduce(
+		(sum: any, child: any) => {
+			const inner = desktopMeasure(child, depth + 1)
+			return { nodes: sum.nodes + inner.nodes, chars: sum.chars + inner.chars, depth: Math.max(sum.depth, inner.depth) }
+		},
+		{ nodes: 1, chars: own, depth }
+	)
+}
+
+test('a pane of many agents stays inside what Desktop will draw, every agent still listed', async ($, on) => {
+	mock.clock(on, { now: 1000 })
+	mock.store(on)
+	on('command.register', () => ({ value: { command: 'crew' } }))
+	on('tool.register', () => ({ value: { tool: 'mcp__crew__set_mascot' } }))
+	on('ui.open', () => ({ value: { isPlaced: true } }))
+	on('ui.toast', () => ({ value: undefined }))
+	on('session.start', (_: unknown, e: any) => ({ cwd: e.cwd }))
+	on('turn.start', (_: unknown, e: any) => ({ turnId: e.turnId }))
+	on('turn.complete', () => ({ text: '' }))
+	on('agent.spawn', (_: unknown, e: any) => ({ model: 'claude-opus-5-5', agentId: e.description }))
+	await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+	await $.turn.start({ text: 'Build it', turnId: 't1' })
+	const count = 60
+	for (let i = 0; i < count; i++) await $.agent.spawn({ prompt: 'go', description: `a${i}`, subagentType: 'general-purpose' })
+	for (let i = 0; i < count - 4; i++) await $.turn.complete({ agentId: `a${i}`, answer: 'x', durationMs: 1, isAborted: false, reason: 'answer' } as any)
+	const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	// Finished opened by hand: 56 agents in one open group.
+	await ui.press({ key: 'group-Finished' })
+	const measured = desktopMeasure(await ui.drawn())
+	expect(measured.nodes).toBeLessThan(2000)
+	expect(measured.depth).toBeLessThan(32)
+	expect(measured.chars).toBeLessThan(262_144)
+	// Nobody is dropped: each agent has its row, a full card while they fit, a line after that.
+	for (let i = 0; i < count; i++) expect(await ui.find({ key: `row-a${i}` })).toBeDefined()
+	expect((await ui.findAll({ type: 'Svg' })).length).toBeGreaterThan(4)
+	// The running four are drawn in full.
+	for (let i = count - 4; i < count; i++) {
+		const row = await ui.find({ key: `row-a${i}` })
+		expect(row?.props.borderStyle).toBe('round')
+	}
+})
+
+test('past what even one-line rows can hold, the rest of a group is a count', async ($, on) => {
+	mock.clock(on, { now: 1000 })
+	mock.store(on)
+	on('command.register', () => ({ value: { command: 'crew' } }))
+	on('tool.register', () => ({ value: { tool: 'mcp__crew__set_mascot' } }))
+	on('ui.open', () => ({ value: { isPlaced: true } }))
+	on('ui.toast', () => ({ value: undefined }))
+	on('session.start', (_: unknown, e: any) => ({ cwd: e.cwd }))
+	on('turn.start', (_: unknown, e: any) => ({ turnId: e.turnId }))
+	on('turn.complete', () => ({ text: '' }))
+	on('agent.spawn', (_: unknown, e: any) => ({ model: 'claude-opus-5-5', agentId: e.description }))
+	await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+	await $.turn.start({ text: 'Build it', turnId: 't1' })
+	const count = 220
+	for (let i = 0; i < count; i++) await $.agent.spawn({ prompt: 'go', description: `a${i}`, subagentType: 'general-purpose' })
+	for (let i = 0; i < count - 4; i++) await $.turn.complete({ agentId: `a${i}`, answer: 'x', durationMs: 1, isAborted: false, reason: 'answer' } as any)
+	const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	await ui.press({ key: 'group-Finished' })
+	const measured = desktopMeasure(await ui.drawn())
+	expect(measured.nodes).toBeLessThan(2000)
+	expect(measured.chars).toBeLessThan(262_144)
+	expect((await ui.find({ key: 'more-Finished' }))?.text).toMatch(/^\+ \d+ more$/)
+	// The terminal has no such limit: every agent keeps its card there.
+	const terminal = await $.ui.mount({ ...PANE, surface: 'terminal' })
+	expect(await terminal.find({ key: 'more-Finished' })).toBeUndefined()
+})
