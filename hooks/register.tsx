@@ -3,7 +3,7 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { AgentStatusView, MascotPrefs } from '../types'
 import { registerBand } from './band'
-import { dirname, dirtyPaths, isGitCommit, joinUp, posix, touchOf } from './files'
+import { SCAN_PRUNE, cdTarget, changedFiles, dirname, dirtyPaths, isGitCommit, joinUp, posix, touchOf } from './files'
 import { registerFilesPane } from './files-pane'
 import { SET_MASCOT_SPEC, SET_MASCOT_TOOL, applyMascotChange, parseMascotInput, sanitizeMascots } from './mascot'
 import { isMoving, openPane, registerPanel, syncPaneShown } from './panel'
@@ -91,18 +91,63 @@ async function introducePane($: EngineInterface, isSidebar: boolean | undefined)
 	else $.ui.toast('Crew: /crew opens the Agents panel')
 }
 
-// What an agent reads and edits, for its Files pane; a commit any agent makes is checked against git once the call returns.
+// What an agent reads and edits through the file tools, for its Files pane.
 async function recordFiles($: EngineInterface, tool: string, input: Record<string, unknown>, agentId: string | undefined) {
 	const touch = touchOf(tool)
 	const path =
 		typeof input.file_path === 'string' ? input.file_path : typeof input.notebook_path === 'string' ? input.notebook_path : ''
-	if (touch && path) {
-		await apply($, { kind: 'touch', at: await $.clock.now(), agentId, path: posix(path), touch })
-		return
+	if (touch && path) await apply($, { kind: 'touch', at: await $.clock.now(), agentId, path: posix(path), touch })
+}
+
+const MARK_MS = 3_000
+const SCAN_MS = 5_000
+
+// Before a Bash command runs: an empty file whose mtime is "before", for `find -newer` to compare against afterwards.
+// Undefined when it cannot be made, which skips the scan; it can never keep the command from running.
+async function markBash($: EngineInterface): Promise<string | undefined> {
+	try {
+		const made = await $.process.run(['mktemp', '-t', 'crew-mark'], { timeoutMs: MARK_MS })
+		return made.exitCode === 0 ? made.stdout.trim() || undefined : undefined
+	} catch {
+		return undefined
 	}
-	// A background command has not finished when the call returns, so HEAD is still the old one.
-	if (tool === 'Bash' && typeof input.command === 'string' && input.run_in_background !== true && isGitCommit(input.command)) {
-		void checkCommit($).catch(() => undefined)
+}
+
+const dropMarker = ($: EngineInterface, marker: string) =>
+	$.process.run(['rm', '-f', marker], { timeoutMs: MARK_MS }).catch(() => undefined)
+
+// After a Bash command: the files it changed become the caller's edits (the file tools never see a `sed -i`, a
+// heredoc'd script or a `cat >`), then, for a commit, the check that turns clean edits green, so it sees them.
+async function afterBash($: EngineInterface, command: string, agentId: string | undefined, marker: string | undefined, isCommit: boolean) {
+	if (marker) {
+		try {
+			await recordBashEdits($, command, agentId, marker)
+		} catch {
+			// A scan that cannot run leaves the files as they are.
+		} finally {
+			await dropMarker($, marker)
+		}
+	}
+	if (isCommit) await checkCommit($)
+}
+
+async function recordBashEdits($: EngineInterface, command: string, agentId: string | undefined, marker: string) {
+	// A leading `cd` is where the command worked: the session folder is only where it began.
+	const cwd = posix(await $.session.cwd())
+	const target = cdTarget(command, await $.env.get('HOME'))
+	const dir = target === null ? cwd : target.startsWith('/') ? target : joinUp(cwd, target)
+	const up = await $.process.run(['git', '--no-optional-locks', '-C', dir, 'rev-parse', '--show-cdup'], { timeoutMs: GIT_MS })
+	// Never scan outside a repository: that could be the home folder.
+	if (up.exitCode !== 0) return
+	const top = joinUp(dir, up.stdout.trim())
+	const prune = SCAN_PRUNE.flatMap((name, at) => (at === 0 ? ['-name', name] : ['-o', '-name', name]))
+	const scan = await $.process.run(
+		['find', top, '(', ...prune, ')', '-prune', '-o', '-type', 'f', '-newer', marker, '-print0'],
+		{ timeoutMs: SCAN_MS }
+	)
+	// find exits non-zero over one unreadable folder yet still lists the rest, so its output counts either way.
+	for (const path of changedFiles(scan.stdout)) {
+		await apply($, { kind: 'touch', at: await $.clock.now(), agentId, path, touch: 'edit' })
 	}
 }
 
@@ -297,11 +342,29 @@ export const register: Register = on => {
 			await $.store.set('mascots', prefs)
 			return { result: mascotSaved(parsed.role, prefs[parsed.role]) }
 		}
-		const ran = await next(e)
+		const input = toolInput(e)
+		const command = tool === 'Bash' && typeof input.command === 'string' ? input.command : undefined
+		// A background command has not finished when the call returns: its files and its HEAD are not settled yet.
+		const isForeground = command !== undefined && input.run_in_background !== true
+		const marker = isForeground ? await markBash($) : undefined
+		let ran: Awaited<ReturnType<typeof next>>
+		try {
+			ran = await next(e)
+		} catch (error) {
+			if (marker) void dropMarker($, marker)
+			throw error
+		}
 		if (ran.deny === undefined && ran.isError !== true) {
-			const input = toolInput(e)
 			if (TASK_TOOLS.has(tool)) await apply($, { kind: 'tasks', agentId: e.agentId, call: { tool, input, result: ran.result } })
 			await recordFiles($, tool, input, e.agentId)
+		}
+		if (isForeground) {
+			// Even a failed command is scanned: a script that fails may have written files first. Only a successful
+			// commit is checked. A denied call ran nothing, so its marker is just removed.
+			const isRun = ran.deny === undefined
+			const isCommit = isRun && ran.isError !== true && isGitCommit(command)
+			void afterBash($, command, e.agentId, isRun ? marker : undefined, isCommit).catch(() => undefined)
+			if (!isRun && marker) void dropMarker($, marker)
 		}
 		return ran
 	}).catch(($, e, next) => next(e)) // a Crew failure never fails a tool call

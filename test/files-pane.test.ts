@@ -24,6 +24,8 @@ type Options = {
 	exits?: Record<string, number>
 	// A tool call on a path containing this fails, as Read does on a missing file.
 	failing?: string
+	// A Bash call whose command contains this fails, as a script that exits non-zero does.
+	failingCommand?: string
 	// A `process.run` whose joined argv starts with this throws, as a command that cannot start does.
 	throwing?: string
 	// Whether `ui.open` finds room for a pane; true when left out.
@@ -68,7 +70,8 @@ async function start($: any, on: any, options: Options = {}) {
 	on('turn.start', (_: unknown, e: any) => ({ turnId: e.turnId }))
 	on('turn.complete', () => ({ text: '' }))
 	on('tool.call', (_: unknown, e: any) =>
-		options.failing && String(e.file_path ?? '').includes(options.failing)
+		(options.failing && String(e.file_path ?? '').includes(options.failing)) ||
+		(options.failingCommand && String(e.command ?? '').includes(options.failingCommand))
 			? { result: 'File does not exist.', isError: true }
 			: { result: {} }
 	)
@@ -567,5 +570,144 @@ test('a commit leaves another agent’s still-dirty file edited, with no footer 
 	const first = await $.ui.mount({ ...FILES, surface: 'desktop' })
 	expect(await stateOf(first, '/repo/a.js')).toBe('committed')
 	await first.unmount()
+	await pane.unmount()
+})
+
+const MARK = '/tmp/crew-mark.abc'
+const bash = (command: string, agentId?: string, extra: object = {}) =>
+	({ tool: 'Bash', command, ...(agentId ? { agentId } : {}), ...extra }) as any
+// What `find` prints: each path ended by a NUL.
+const found = (...paths: string[]) => paths.map(path => `${path}\0`).join('')
+const finds = (ran: string[][]) => ran.filter(argv => argv[0] === 'find')
+
+test('the files a Bash command rewrote are recorded as edited for the agent that ran it', async ($, on) => {
+	const { clock, ran } = await start($, on, {
+		stdout: {
+			mktemp: `${MARK}\n`,
+			[`${GIT} /repo rev-parse --show-cdup`]: '\n',
+			'find /repo': found('/repo/lib/notebook.ts', '/repo/components/card.tsx')
+		}
+	})
+	await $.tool.call(bash("cd /repo && python3 - <<'EOF'\nopen('lib/notebook.ts', 'w').write('x')\nEOF", 'a1'))
+	await clock.settle()
+	const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	expect((await pane.find({ key: 'files-a1' }))?.text).toBe('▸ 2')
+	expect(await pane.find({ key: 'files-a2' })).toBeUndefined()
+	await pane.press({ key: 'files-a1' })
+	const files = await $.ui.mount({ ...FILES, surface: 'desktop' })
+	expect(await stateOf(files, '/repo/lib/notebook.ts')).toBe('edited')
+	expect(await stateOf(files, '/repo/components/card.tsx')).toBe('edited')
+	// The marker is made before the command and removed once the scan is done.
+	expect(ran).toContainEqual(['mktemp', '-t', 'crew-mark'])
+	expect(ran).toContainEqual(['rm', '-f', MARK])
+	const [scan] = finds(ran)
+	expect(scan.slice(0, 2)).toEqual(['find', '/repo'])
+	expect(scan).toContain('-newer')
+	expect(scan[scan.indexOf('-newer') + 1]).toBe(MARK)
+	expect(scan).toContain('-print0')
+	expect(scan[scan.indexOf('node_modules') - 1]).toBe('-name')
+	await files.unmount()
+	await pane.unmount()
+})
+
+test('a Bash command that starts with no cd is scanned in the session folder', async ($, on) => {
+	const { clock, ran } = await start($, on, {
+		stdout: { mktemp: `${MARK}\n`, [`${GIT} /repo rev-parse --show-cdup`]: '\n', 'find /repo': found('/repo/lib/x.ts') }
+	})
+	await $.tool.call(bash("sed -i '' s/a/b/ lib/x.ts", 'a1'))
+	await clock.settle()
+	expect(ran).toContainEqual(['git', '--no-optional-locks', '-C', '/repo', 'rev-parse', '--show-cdup'])
+	const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	expect((await pane.find({ key: 'files-a1' }))?.text).toBe('▸ 1')
+	await pane.unmount()
+})
+
+test('a relative cd and a Main call land in the folder git finds, on Main’s card', async ($, on) => {
+	const { clock, ran } = await start($, on, {
+		stdout: { mktemp: `${MARK}\n`, [`${GIT} /repo/app rev-parse --show-cdup`]: '../\n', 'find /repo': found('/repo/app/y.ts') }
+	})
+	await $.tool.call(bash('cd app; touch y.ts'))
+	await clock.settle()
+	expect(finds(ran)).toHaveLength(1)
+	const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	expect((await pane.find({ key: 'files-main' }))?.text).toBe('▸ 1')
+	await pane.unmount()
+})
+
+test('outside a git repository nothing is scanned, and the marker is still removed', async ($, on) => {
+	const { clock, ran } = await start($, on, {
+		stdout: { mktemp: `${MARK}\n`, 'find /repo': found('/repo/a.ts') },
+		exits: { [`${GIT} /repo rev-parse`]: 128 }
+	})
+	await $.tool.call(bash('sed -i x a.ts', 'a1'))
+	await clock.settle()
+	expect(finds(ran)).toHaveLength(0)
+	expect(ran).toContainEqual(['rm', '-f', MARK])
+	const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	expect(await pane.find({ key: 'files-a1' })).toBeUndefined()
+	await pane.unmount()
+})
+
+test('more than 100 changed files is an install or a build, so none are recorded', async ($, on) => {
+	const paths = Array.from({ length: 101 }, (_, at) => `/repo/gen/f${at}.js`)
+	const { clock, ran } = await start($, on, {
+		stdout: { mktemp: `${MARK}\n`, [`${GIT} /repo rev-parse --show-cdup`]: '\n', 'find /repo': found(...paths) }
+	})
+	await $.tool.call(bash('npm run generate', 'a1'))
+	await clock.settle()
+	expect(finds(ran)).toHaveLength(1)
+	expect(ran).toContainEqual(['rm', '-f', MARK])
+	const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	expect(await pane.find({ key: 'files-a1' })).toBeUndefined()
+	await pane.unmount()
+})
+
+test('a background command makes no marker and is not scanned', async ($, on) => {
+	const { clock, ran } = await start($, on, { stdout: { mktemp: `${MARK}\n` } })
+	await $.tool.call(bash('npm run dev', 'a1', { run_in_background: true }))
+	await clock.settle()
+	expect(ran.some(argv => argv[0] === 'mktemp' || argv[0] === 'find' || argv[0] === 'rm')).toBe(false)
+})
+
+test('a marker that cannot be made skips the scan and never stops the command', async ($, on) => {
+	const { clock, ran } = await start($, on, { throwing: 'mktemp' })
+	const result = await $.tool.call(bash('sed -i x a.ts', 'a1'))
+	await clock.settle()
+	expect(result).toEqual({ result: {} })
+	expect(ran.some(argv => argv[0] === 'find' || argv[0] === 'rm')).toBe(false)
+})
+
+test('a command that failed is still scanned, since its script may have written files first', async ($, on) => {
+	const { clock } = await start($, on, {
+		failingCommand: 'broken',
+		stdout: { mktemp: `${MARK}\n`, [`${GIT} /repo rev-parse --show-cdup`]: '\n', 'find /repo': found('/repo/partial.py') }
+	})
+	await $.tool.call(bash('python3 broken.py', 'a1'))
+	await clock.settle()
+	const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	expect((await pane.find({ key: 'files-a1' }))?.text).toBe('▸ 1')
+	await pane.unmount()
+})
+
+test('a command that edits and commits records its files before the commit check turns them green', async ($, on) => {
+	const { clock } = await start($, on, {
+		stdout: {
+			mktemp: `${MARK}\n`,
+			[`${GIT} /repo rev-parse --show-cdup`]: '\n',
+			[`${GIT} /repo/src rev-parse --show-cdup`]: '../\n',
+			'find /repo': found('/repo/src/a.js'),
+			[`${GIT} /repo status`]: '',
+			[`${GIT} /repo ls-files`]: 'src/a.js\0',
+			[`${GIT} /repo rev-parse --short HEAD`]: 'abc1234\n'
+		}
+	})
+	await $.tool.call(bash("sed -i '' s/a/b/ src/a.js && git commit -am x", 'a1'))
+	await clock.settle()
+	const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	await pane.press({ key: 'files-a1' })
+	const files = await $.ui.mount({ ...FILES, surface: 'desktop' })
+	expect(await stateOf(files, '/repo/src/a.js')).toBe('committed')
+	expect((await files.find({ type: 'Text', text: /^committed abc1234$/ }))?.text).toBe('committed abc1234')
+	await files.unmount()
 	await pane.unmount()
 })

@@ -3,8 +3,11 @@ import { expect, test } from 'claude-code/testing'
 import type { FileEntry } from '../types'
 import {
 	MAX_FILES,
+	SCAN_PRUNE,
 	applyCommitted,
 	applyTouch,
+	cdTarget,
+	changedFiles,
 	dirtyPaths,
 	fileTree,
 	headline,
@@ -297,4 +300,46 @@ test('openCommand knows the other launchers', () => {
 	}
 	for (const name of ['a.jar', 'a.fileloc', 'a.inetloc', 'a.prefpane']) expect(openCommand('darwin', `/repo/${name}`, false)?.isReveal).toBe(true)
 	expect(openCommand('linux', '/repo/a.jar', false)?.isReveal).toBe(true)
+})
+
+test('cdTarget reads the folder a command starts by changing to', () => {
+	expect(cdTarget('cd /a && x', '/h')).toBe('/a')
+	expect(cdTarget('cd /a; x', '/h')).toBe('/a')
+	expect(cdTarget('cd /a\nx', '/h')).toBe('/a')
+	expect(cdTarget('  cd /a/ && x', '/h')).toBe('/a')
+	expect(cdTarget('cd ~/w; x', '/h')).toBe('/h/w')
+	expect(cdTarget('cd ~ && x', '/h')).toBe('/h')
+	expect(cdTarget('cd "/a b" && x', '/h')).toBe('/a b')
+	expect(cdTarget("cd '/a b' && x", '/h')).toBe('/a b')
+	expect(cdTarget('cd rel/dir && x', '/h')).toBe('rel/dir')
+})
+
+test('cdTarget is null without a leading cd, or one it cannot resolve', () => {
+	expect(cdTarget('sed -i s/a/b/ x.ts', '/h')).toBeNull()
+	expect(cdTarget('echo hi && cd /a && x', '/h')).toBeNull()
+	expect(cdTarget('cd', '/h')).toBeNull()
+	expect(cdTarget('cd /a', '/h')).toBeNull()
+	expect(cdTarget('cd /a | tee x', '/h')).toBeNull()
+	expect(cdTarget('cdx /a && x', '/h')).toBeNull()
+	expect(cdTarget('cd - && x', '/h')).toBeNull()
+	expect(cdTarget('cd $HOME/w && x', '/h')).toBeNull()
+	// A home that is not known leaves a ~ unresolved.
+	expect(cdTarget('cd ~/w && x', undefined)).toBeNull()
+})
+
+test('changedFiles splits find’s NUL output, drops empties and gives up past the cap', () => {
+	expect(changedFiles('/r/a.ts\0/r/b dir/c.ts\0')).toEqual(['/r/a.ts', '/r/b dir/c.ts'])
+	expect(changedFiles('\0\0/r/a.ts\0\0')).toEqual(['/r/a.ts'])
+	expect(changedFiles('')).toEqual([])
+	expect(changedFiles('C:\\r\\a.ts\0')).toEqual(['C:/r/a.ts'])
+	const many = (count: number) => Array.from({ length: count }, (_, at) => `/r/f${at}.js\0`).join('')
+	expect(changedFiles(many(100))).toHaveLength(100)
+	expect(changedFiles(many(101))).toEqual([])
+	expect(changedFiles(many(3), 2)).toEqual([])
+})
+
+test('the scan skips folders that hold dependencies, builds and caches', () => {
+	expect(SCAN_PRUNE.slice(0, 2)).toEqual(['.git', 'node_modules'])
+	expect(SCAN_PRUNE).toContain('__pycache__')
+	expect(new Set(SCAN_PRUNE).size).toBe(SCAN_PRUNE.length)
 })

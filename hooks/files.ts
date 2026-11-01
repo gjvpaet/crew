@@ -75,6 +75,34 @@ export function isGitCommit(command: string): boolean {
 	})
 }
 
+// The folder a command starts by changing into (`cd <path>` then `&&`, `;` or a newline), where a Bash edit is then
+// looked for; null when it does not start that way or the path cannot be known from the text (a variable, an
+// unknown home, `cd -`). A relative path comes back as written, for the caller to resolve against its own folder.
+export function cdTarget(command: string, home: string | undefined): string | null {
+	const found = /^\s*cd[ \t]+(?:"([^"]*)"|'([^']*)'|([^\s;&|"'<>()]+))[ \t]*(?:&&|;|\n)/.exec(command)
+	if (!found) return null
+	const raw = found[1] ?? found[2] ?? found[3]
+	if (raw === '' || raw === '-' || /[$`]/.test(raw)) return null
+	let path = raw
+	if (raw === '~' || raw.startsWith('~/')) {
+		if (!home) return null
+		path = home.replace(/\/+$/, '') + raw.slice(1)
+	}
+	return path.replace(/\/+$/, '') || '/'
+}
+
+// Folders a scan for changed files never enters: version control, dependencies, build output and caches.
+export const SCAN_PRUNE = [
+	'.git', 'node_modules', '.next', '.nuxt', '.svelte-kit', 'dist', 'build', 'out', 'coverage', '.turbo', '.cache',
+	'.parcel-cache', '.venv', 'venv', '__pycache__', 'target', '.gradle', '.idea'
+]
+
+// The paths `find -print0` listed. Past `cap` it was an install or a build rather than an agent's edit, so none count.
+export function changedFiles(stdout: string, cap = 100): string[] {
+	const paths = stdout.split('\0').filter(Boolean).map(posix)
+	return paths.length > cap ? [] : paths
+}
+
 // `git status --porcelain -z`: `XY path` entries split by NUL, a rename or copy (in either column) followed by its old path.
 export function dirtyPaths(porcelainZ: string): Set<string> {
 	const tokens = porcelainZ.split('\0')
