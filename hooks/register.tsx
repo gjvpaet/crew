@@ -91,7 +91,7 @@ async function introducePane($: EngineInterface, isSidebar: boolean | undefined)
 	else $.ui.toast('Crew: /crew opens the Agents panel')
 }
 
-// What an agent reads and edits, for its Files pane; a commit it makes is checked against git once the call returns.
+// What an agent reads and edits, for its Files pane; a commit any agent makes is checked against git once the call returns.
 async function recordFiles($: EngineInterface, tool: string, input: Record<string, unknown>, agentId: string | undefined) {
 	const touch = touchOf(tool)
 	const path =
@@ -102,20 +102,24 @@ async function recordFiles($: EngineInterface, tool: string, input: Record<strin
 	}
 	// A background command has not finished when the call returns, so HEAD is still the old one.
 	if (tool === 'Bash' && typeof input.command === 'string' && input.run_in_background !== true && isGitCommit(input.command)) {
-		void checkCommit($, agentId).catch(() => undefined)
+		void checkCommit($).catch(() => undefined)
 	}
 }
 
 const GIT_MS = 5_000
 
-// Which of the agent's edited files git now holds clean: those turn committed, with the commit's short SHA. Each file
-// is asked in its own repository, since an agent in a git worktree works outside the checkout the session started in.
+// Which of every agent's edited files git now holds clean: those turn committed, with the commit's short SHA. A commit by
+// any agent checks them all, because Main often commits its sub-agents' work. Each file is asked in its own repository,
+// since an agent in a git worktree works outside the checkout the session started in.
 // --no-optional-locks keeps these reads from taking index.lock under the agent's next git command. `ls-files` is what
 // keeps untracked, ignored and deleted files from counting as committed: status lists none of them as dirty.
-async function checkCommit($: EngineInterface, agentId: string | undefined) {
+async function checkCommit($: EngineInterface) {
 	const checkedAt = await $.clock.now()
-	const files = (await read($, model)).files?.[agentId ?? MAIN] ?? []
-	const edited = files.filter(item => item.state === 'edited').map(item => item.path)
+	const files = (await read($, model)).files ?? {}
+	const editedBy = Object.entries(files).map(
+		([key, list]) => [key, list.filter(item => item.state === 'edited').map(item => item.path)] as const
+	)
+	const edited = [...new Set(editedBy.flatMap(([, paths]) => paths))]
 	if (edited.length === 0) return
 	const git = (dir: string, ...args: string[]) =>
 		$.process.run(['git', '--no-optional-locks', '-C', dir, ...args], { timeoutMs: GIT_MS })
@@ -127,8 +131,8 @@ async function checkCommit($: EngineInterface, agentId: string | undefined) {
 		const top = joinUp(dir, up.stdout.trim())
 		tops.set(top, [...(tops.get(top) ?? []), ...edited.filter(path => dirname(path) === dir)])
 	}
-	const committed: string[] = []
-	let sha: string | undefined
+	// Each clean path with the SHA of its own repository's HEAD, which is unknown if HEAD could not be read.
+	const clean = new Map<string, string | undefined>()
 	for (const [top, paths] of tops) {
 		try {
 			const status = await git(top, 'status', '--porcelain', '-z', '--', ...paths)
@@ -141,18 +145,28 @@ async function checkCommit($: EngineInterface, agentId: string | undefined) {
 			const tracked = await git(top, 'ls-files', '-z', '--full-name', '--', ...unlisted)
 			if (tracked.exitCode !== 0) continue
 			const known = new Set(tracked.stdout.split('\0').filter(Boolean).map(path => `${top}/${path}`))
-			const clean = unlisted.filter(path => known.has(path))
-			if (clean.length === 0) continue
+			const found = unlisted.filter(path => known.has(path))
+			if (found.length === 0) continue
 			const head = await git(top, 'rev-parse', '--short', 'HEAD')
-			committed.push(...clean)
-			if (head.exitCode === 0) sha = head.stdout.trim()
+			const sha = head.exitCode === 0 ? head.stdout.trim() : undefined
+			for (const path of found) clean.set(path, sha)
 		} catch {
 			// One repository that cannot be asked leaves the rest to be checked.
 		}
 	}
-	// Nothing turned clean: no commit happened, so no SHA is stamped either.
-	if (committed.length === 0) return
-	await apply($, { kind: 'committed', agentId, at: checkedAt, paths: committed, ...(sha ? { sha } : {}) })
+	// An agent with nothing clean gets no event, so no SHA is stamped on it either.
+	for (const [key, paths] of editedBy) {
+		const mine = paths.filter(path => clean.has(path))
+		if (mine.length === 0) continue
+		const sha = clean.get(mine[mine.length - 1])
+		await apply($, {
+			kind: 'committed',
+			agentId: key === MAIN ? undefined : key,
+			at: checkedAt,
+			paths: mine,
+			...(sha ? { sha } : {})
+		})
+	}
 }
 
 export const register: Register = on => {

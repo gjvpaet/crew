@@ -513,3 +513,59 @@ test('no check, a failed check or nothing clean leaves the files edited and stam
 	await files.unmount()
 	await pane.unmount()
 })
+
+test('Main committing turns a sub-agent’s clean edit green too, and every pane shows the SHA', async ($, on) => {
+	const { clock, ran } = await start($, on, {
+		stdout: {
+			[`${GIT} /repo/src rev-parse --show-cdup`]: '../\n',
+			[`${GIT} /repo rev-parse --show-cdup`]: '\n',
+			[`${GIT} /repo ls-files`]: 'src/a.js\0README.md\0',
+			[`${GIT} /repo rev-parse --short HEAD`]: 'abc1234\n'
+		}
+	})
+	await $.tool.call(edit('/repo/src/a.js', 'a1'))
+	await $.tool.call(edit('/repo/README.md'))
+	await $.tool.call({ tool: 'Bash', command: 'git commit -am x' } as any)
+	await clock.settle()
+	const statuses = ran.filter(argv => argv.join(' ').startsWith(`${GIT} /repo status`))
+	expect(statuses).toHaveLength(1)
+	expect(statuses[0].slice(-2).sort()).toEqual(['/repo/README.md', '/repo/src/a.js'])
+	const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	for (const [key, path] of [
+		['files-a1', '/repo/src/a.js'],
+		['files-main', '/repo/README.md']
+	]) {
+		await pane.press({ key })
+		const files = await $.ui.mount({ ...FILES, surface: 'desktop' })
+		expect(await stateOf(files, path)).toBe('committed')
+		expect((await files.find({ type: 'Text', text: /^committed abc1234$/ }))?.text).toBe('committed abc1234')
+		await files.unmount()
+	}
+	await pane.unmount()
+})
+
+test('a commit leaves another agent’s still-dirty file edited, with no footer in its pane', async ($, on) => {
+	const { clock } = await start($, on, {
+		stdout: {
+			[`${GIT} /repo rev-parse --show-cdup`]: '\n',
+			[`${GIT} /repo status`]: ' M wip.js\0',
+			[`${GIT} /repo ls-files`]: 'a.js\0',
+			[`${GIT} /repo rev-parse --short HEAD`]: 'abc1234\n'
+		}
+	})
+	await $.tool.call(edit('/repo/a.js', 'a1'))
+	await $.tool.call(edit('/repo/wip.js', 'a2'))
+	await $.tool.call({ tool: 'Bash', command: 'git commit -am x', agentId: 'a1' } as any)
+	await clock.settle()
+	const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	await pane.press({ key: 'files-a2' })
+	const files = await $.ui.mount({ ...FILES, surface: 'desktop' })
+	expect(await stateOf(files, '/repo/wip.js')).toBe('edited')
+	expect(await files.find({ type: 'Text', text: /^committed / })).toBeUndefined()
+	await files.unmount()
+	await pane.press({ key: 'files-a1' })
+	const first = await $.ui.mount({ ...FILES, surface: 'desktop' })
+	expect(await stateOf(first, '/repo/a.js')).toBe('committed')
+	await first.unmount()
+	await pane.unmount()
+})
