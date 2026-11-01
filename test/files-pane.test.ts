@@ -264,10 +264,12 @@ test('on Desktop only the live name shines, as an SVG, and its folder shows the 
 	expect(shine.props.alt).toBe('PriceTable.jsx')
 	expect(shine.props.isInteractive).toBe(true)
 	expect(shine.props.source).toContain('@keyframes')
-	// An SVG cannot sit in a Button, so the press is the folder, named after the file; it reveals rather than opens.
+	// An SVG cannot sit in a Button, so the press is the folder; it reveals rather than opens. Desktop draws a Button's
+	// label, so the label is the folder, dim.
 	expect(folder.type).toBe('Button')
 	expect(folder.props.key).toBe('open-/repo/src/PriceTable.jsx')
-	expect(folder.props.label).toBe('PriceTable.jsx')
+	expect(folder.props.label).toBe('src')
+	expect(folder.props.dimColor).toBe(true)
 	expect(shown(folder.children[0])).toBe('src')
 	expect(folder.children[0].props.color).toBe('#8D8B84')
 	// Nothing past the name cell but the pill: no open mark.

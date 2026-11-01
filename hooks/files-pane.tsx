@@ -275,10 +275,11 @@ export function registerFilesPane(on: On) {
 				]
 			if (Svg) {
 				const shine = shineSvg(row.name, base, { fontSize: NAME_PX, weight: 500 })
-				// An SVG cannot sit in a Button, so the live row is pressed by its folder, which shows the file in it.
+				// An SVG cannot sit in a Button, so the live row is pressed by its folder, which shows the file in it. Desktop
+				// draws a Button's label rather than its children, so the label is the folder too.
 				return [
 					<Svg source={shine.source} alt={row.name} width={shine.width} height={shine.height} isInteractive />,
-					<Button key={`open-${row.path}`} plain label={row.name} onPress={() => openFile($, row.path, true)}>
+					<Button key={`open-${row.path}`} plain dimColor label={row.folder} onPress={() => openFile($, row.path, true)}>
 						{folderText(row)}
 					</Button>
 				]
@@ -397,7 +398,7 @@ export function registerFilesPane(on: On) {
 						{...cardFill}
 						paddingX={1}
 					>
-						<Box key="touched-head" flexDirection="row" marginBottom={Svg ? 'xs' : 0}>
+						<Box key="touched-head" flexDirection="row" marginBottom={Svg ? 'sm' : 0}>
 							<Box flexGrow={1}>
 								<Text size="caption" weight="medium" {...tint(LOOK.muted)}>
 									TOUCHED
