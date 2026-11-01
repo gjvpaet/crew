@@ -3,7 +3,7 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { AgentStatusView, MascotPrefs } from '../types'
 import { registerBand } from './band'
-import { dirtyPaths, isGitCommit, posix, touchOf } from './files'
+import { dirtyPaths, isGitCommit, joinUp, posix, touchOf } from './files'
 import { SET_MASCOT_SPEC, SET_MASCOT_TOOL, applyMascotChange, parseMascotInput, sanitizeMascots } from './mascot'
 import { isMoving, openPane, registerPanel, syncPaneShown } from './panel'
 import { TASK_TOOLS } from './tasks'
@@ -99,35 +99,54 @@ async function recordFiles($: EngineInterface, tool: string, input: Record<strin
 		await apply($, { kind: 'touch', at: await $.clock.now(), agentId, path: posix(path), touch })
 		return
 	}
-	if (tool === 'Bash' && typeof input.command === 'string' && isGitCommit(input.command)) {
+	// A background command has not finished when the call returns, so HEAD is still the old one.
+	if (tool === 'Bash' && typeof input.command === 'string' && input.run_in_background !== true && isGitCommit(input.command)) {
 		void checkCommit($, agentId).catch(() => undefined)
 	}
 }
 
 const GIT_MS = 5_000
 
-// Which of the agent's edited files git now holds clean: those turn committed, with the commit's short SHA. Paths
-// outside the repository are left out, since git refuses a status that names one.
+const dirnameOf = (path: string) => path.slice(0, path.lastIndexOf('/')) || '/'
+
+// Which of the agent's edited files git now holds clean: those turn committed, with the commit's short SHA. Each file
+// is asked in its own repository, since an agent in a git worktree works outside the checkout the session started in.
+// --no-optional-locks keeps these reads from taking index.lock under the agent's next git command. Ignored and
+// untracked files are listed too (`!!`, `??`), so a file git never tracks is not mistaken for a committed one.
 async function checkCommit($: EngineInterface, agentId: string | undefined) {
+	const checkedAt = await $.clock.now()
 	const files = (await read($, model)).files?.[agentId ?? MAIN] ?? []
 	const edited = files.filter(item => item.state === 'edited').map(item => item.path)
 	if (edited.length === 0) return
-	const cwd = posix(await $.session.cwd())
-	const top = await $.process.run(['git', '-C', cwd, 'rev-parse', '--show-toplevel'], { timeoutMs: GIT_MS })
-	if (top.exitCode !== 0) return
-	const root = posix(top.stdout.trim())
-	const inRepo = edited.filter(path => path.startsWith(`${root}/`))
-	if (inRepo.length === 0) return
-	const status = await $.process.run(['git', '-C', cwd, 'status', '--porcelain', '-z', '--', ...inRepo], { timeoutMs: GIT_MS })
-	if (status.exitCode !== 0) return
-	const dirty = new Set([...dirtyPaths(status.stdout)].map(path => `${root}/${path}`))
-	const head = await $.process.run(['git', '-C', cwd, 'rev-parse', '--short', 'HEAD'], { timeoutMs: GIT_MS })
-	await apply($, {
-		kind: 'committed',
-		agentId,
-		paths: inRepo.filter(path => !dirty.has(path)),
-		...(head.exitCode === 0 ? { sha: head.stdout.trim() } : {})
-	})
+	const git = (dir: string, ...args: string[]) =>
+		$.process.run(['git', '--no-optional-locks', '-C', dir, ...args], { timeoutMs: GIT_MS })
+	const tops = new Map<string, string[]>()
+	for (const dir of new Set(edited.map(dirnameOf))) {
+		const up = await git(dir, 'rev-parse', '--show-cdup').catch(() => null)
+		// Not in a repository, or a directory since deleted: those files are left as they are.
+		if (!up || up.exitCode !== 0) continue
+		const top = joinUp(dir, up.stdout.trim())
+		tops.set(top, [...(tops.get(top) ?? []), ...edited.filter(path => dirnameOf(path) === dir)])
+	}
+	const committed: string[] = []
+	let sha: string | undefined
+	for (const [top, paths] of tops) {
+		try {
+			const status = await git(top, 'status', '--porcelain', '-z', '--ignored', '--untracked-files=all', '--', ...paths)
+			if (status.exitCode !== 0) continue
+			const dirty = new Set([...dirtyPaths(status.stdout)].map(path => `${top}/${path}`))
+			const clean = paths.filter(path => !dirty.has(path))
+			if (clean.length === 0) continue
+			const head = await git(top, 'rev-parse', '--short', 'HEAD')
+			committed.push(...clean)
+			if (head.exitCode === 0) sha = head.stdout.trim()
+		} catch {
+			// One repository that cannot be asked leaves the rest to be checked.
+		}
+	}
+	// Nothing turned clean: no commit happened, so no SHA is stamped either.
+	if (committed.length === 0) return
+	await apply($, { kind: 'committed', agentId, at: checkedAt, paths: committed, ...(sha ? { sha } : {}) })
 }
 
 export const register: Register = on => {

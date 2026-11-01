@@ -34,9 +34,23 @@ export function applyTouch(
 	return next
 }
 
-export function applyCommitted(entries: readonly FileEntry[], paths: readonly string[]): FileEntry[] {
+// Only files last touched by the time the check began: an edit that landed while git was being asked stays edited.
+export function applyCommitted(entries: readonly FileEntry[], paths: readonly string[], until = Infinity): FileEntry[] {
 	const clean = new Set(paths)
-	return entries.map(item => (item.state === 'edited' && clean.has(item.path) ? { ...item, state: 'committed' as const } : item))
+	return entries.map(item =>
+		item.state === 'edited' && item.at <= until && clean.has(item.path) ? { ...item, state: 'committed' as const } : item
+	)
+}
+
+// A directory climbed by `git rev-parse --show-cdup` ('', '../', '../../'), with the `..` resolved on the text alone:
+// the caller's spelling of the path (/tmp or /private/tmp) is kept, which a realpath would not.
+export function joinUp(dir: string, cdup: string): string {
+	const parts = dir.split('/')
+	for (const step of cdup.split('/')) {
+		if (step === '..') parts.pop()
+		else if (step !== '' && step !== '.') parts.push(step)
+	}
+	return parts.join('/') || '/'
 }
 
 export const latestOf = (entries: readonly FileEntry[]) =>

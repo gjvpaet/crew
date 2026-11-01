@@ -21,6 +21,9 @@ export async function showFiles($: EngineInterface, key: string) {
 	}
 	await update($, filesFor, () => key)
 	const agent = (await read($, model)).agents[key]
-	const opened = await $.ui.open({ id: FILES_PANE, title: titleOf(agent?.description) })
-	if (!opened.isPlaced) $.ui.toast('Crew: the Files pane has no room here')
+	const opened = await $.ui.open({ id: FILES_PANE, title: titleOf(agent?.description) }).catch(() => ({ isPlaced: false }))
+	if (opened.isPlaced) return
+	// Nothing shows the pane, so the chevron must not stay lit for it.
+	await update($, filesFor, () => null)
+	$.ui.toast('Crew: the Files pane has no room here')
 }

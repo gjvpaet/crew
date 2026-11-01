@@ -41,7 +41,7 @@ export type CrewEvent =
 	| { kind: 'tasks'; agentId?: string; call: TaskToolCall }
 	| { kind: 'statuses'; at: number; list: readonly ListedAgent[] }
 	| { kind: 'touch'; at: number; agentId?: string; path: string; touch: Touch }
-	| { kind: 'committed'; agentId?: string; paths: string[]; sha?: string }
+	| { kind: 'committed'; agentId?: string; at?: number; paths: string[]; sha?: string }
 
 const ENDED = new Set<AgentStatusView>(['completed', 'failed', 'killed', 'stopped'])
 const FAILED = new Set<AgentStatusView>(['failed', 'killed', 'stopped'])
@@ -288,7 +288,7 @@ function addTouch(state: CrewState, ev: Extract<CrewEvent, { kind: 'touch' }>): 
 function markCommitted(state: CrewState, ev: Extract<CrewEvent, { kind: 'committed' }>): CrewState {
 	const key = ev.agentId ?? MAIN
 	const list = state.files[key] ?? []
-	const marked = applyCommitted(list, ev.paths)
+	const marked = applyCommitted(list, ev.paths, ev.at)
 	const isMarked = marked.some((item, index) => item !== list[index])
 	if (!isMarked && !ev.sha) return state
 	return {

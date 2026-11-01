@@ -217,7 +217,7 @@ export function registerPanel(on: On) {
 				<Box flexDirection="column" flexGrow={1} width={0}>
 					<Box flexDirection="row" gap={1}>
 						{/* The title gives way first; Main's waiting note keeps its width beside it. */}
-						<Box flexShrink={1} flexGrow={1}>
+						<Box flexShrink={1}>
 							<Text weight="semibold" wrap="truncate-end">
 								{row.title}
 							</Text>
@@ -227,6 +227,8 @@ export function registerPanel(on: On) {
 								<Text color={TONE[row.tone]}>{row.waiting}</Text>
 							</Box>
 						)}
+						{/* The spacer pushes the chevron to the row's right end, past the waiting note. */}
+						{row.fileCount > 0 && <Box flexGrow={1} />}
 						{row.fileCount > 0 && (
 							<Box flexShrink={0}>
 								<Button key={`files-${row.id}`} {...chevronProps(row)} onPress={() => showFiles($, row.id)} />

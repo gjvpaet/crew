@@ -442,6 +442,16 @@ test('a commit marks only the listed files and keeps the SHA', () => {
 	expect(quiet.files).toEqual({})
 })
 
+test('a file touched after the commit check began stays edited', () => {
+	const state = run([
+		...START,
+		{ kind: 'touch', at: 3000, agentId: 'a1', path: '/repo/a.js', touch: 'edit' },
+		{ kind: 'touch', at: 3500, agentId: 'a1', path: '/repo/b.js', touch: 'edit' },
+		{ kind: 'committed', agentId: 'a1', at: 3000, paths: ['/repo/a.js', '/repo/b.js'] }
+	])
+	expect(state.files.a1.map(item => item.state)).toEqual(['committed', 'edited'])
+})
+
 test('a new prompt keeps the files of agents still at work and drops the rest with their cards', () => {
 	const state = run([
 		...START,

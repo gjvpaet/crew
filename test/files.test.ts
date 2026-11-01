@@ -9,6 +9,7 @@ import {
 	fileTree,
 	headline,
 	isGitCommit,
+	joinUp,
 	latestOf,
 	posix,
 	touchOf
@@ -57,6 +58,17 @@ test('the cap never evicts the file just touched', () => {
 test('a commit turns only the listed edited files committed', () => {
 	const list = [entry('/r/a', 'edited'), entry('/r/b', 'edited'), entry('/r/c', 'read')]
 	expect(applyCommitted(list, ['/r/a', '/r/c']).map(item => item.state)).toEqual(['committed', 'edited', 'read'])
+})
+
+test('a commit leaves a file edited after the check began', () => {
+	const list = [entry('/r/a', 'edited', 5), entry('/r/b', 'edited', 9)]
+	expect(applyCommitted(list, ['/r/a', '/r/b'], 5).map(item => item.state)).toEqual(['committed', 'edited'])
+})
+
+test('joinUp climbs a directory by what git prints for the way up, keeping the spelling', () => {
+	expect(joinUp('/repo/src/pricing', '../../')).toBe('/repo')
+	expect(joinUp('/repo', '')).toBe('/repo')
+	expect(joinUp('/tmp/x/a', '../')).toBe('/tmp/x')
 })
 
 test('only Read, Edit, Write and NotebookEdit touch files', () => {

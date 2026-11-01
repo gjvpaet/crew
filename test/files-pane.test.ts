@@ -22,6 +22,8 @@ type Options = {
 	exits?: Record<string, number>
 	// A tool call on a path containing this fails, as Read does on a missing file.
 	failing?: string
+	// Whether `ui.open` finds room for a pane; true when left out.
+	isPlaced?: boolean
 }
 
 const answer = (table: Record<string, string | number> | undefined, argv: string[]) =>
@@ -38,7 +40,7 @@ async function start($: any, on: any, options: Options = {}) {
 	on('tool.register', () => ({ value: { tool: 'mcp__crew__set_mascot' } }))
 	on('ui.open', (_: unknown, e: any) => {
 		opened.push({ id: e.id, title: e.title })
-		return { value: { isPlaced: true } }
+		return { value: { isPlaced: options.isPlaced ?? true } }
 	})
 	on('ui.close', (_: unknown, e: any) => {
 		closed.push(e.id)
@@ -129,5 +131,15 @@ test('the chevron opens the Files pane on its agent, switches it and closes it',
 	await ui.press({ key: 'files-a2' })
 	expect(closed).toEqual(['crew-files'])
 	expect((await ui.find({ key: 'files-a2' }))?.text).toBe('▸ 1')
+	await ui.unmount()
+})
+
+test('a Files pane nobody sees leaves the chevron unlit and says so', async ($, on) => {
+	const { toasts } = await start($, on, { isPlaced: false })
+	await $.tool.call(read('/repo/a.js', 'a1'))
+	const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	await ui.press({ key: 'files-a1' })
+	expect((await ui.find({ key: 'files-a1' }))?.text).toBe('▸ 1')
+	expect(toasts.some(toast => toast.includes('Files pane'))).toBe(true)
 	await ui.unmount()
 })
