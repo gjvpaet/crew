@@ -13,6 +13,8 @@ import {
 	posix,
 	touchOf
 } from '../hooks/files'
+import { EMPTY_STATE, reduce, type CrewEvent } from '../hooks/tracker'
+import { agentAccent, panelView, pulseAt, ACCENTS } from '../hooks/view'
 
 const NB = '\u00a0'
 const entry = (path: string, state: FileEntry['state'], at = 1): FileEntry => ({ path, state, at })
@@ -194,4 +196,21 @@ test('a file directly under / outside the project keeps / as its folder', () => 
 		line: 'Reading notes.md',
 		where: '/'
 	})
+})
+
+test('a card row carries its file count and whether the Files pane shows it', () => {
+	const events: CrewEvent[] = [
+		{ kind: 'turnStart', at: 1000, turnId: 't1', text: 'Build it' },
+		{ kind: 'spawn', at: 1500, agentId: 'a1', description: 'Implement', subagentType: 'general-purpose' },
+		{ kind: 'touch', at: 2000, agentId: 'a1', path: '/repo/a.js', touch: 'read' },
+		{ kind: 'touch', at: 2100, agentId: 'a1', path: '/repo/b.js', touch: 'edit' }
+	]
+	const state = events.reduce(reduce, EMPTY_STATE)
+	const shown = panelView(state, {}, 3000, 20, {}, { filesFor: 'a1' })
+	expect(shown.groups[0].rows[0]).toMatchObject({ fileCount: 2, isFilesShown: true })
+	expect(shown.main).toMatchObject({ fileCount: 0, isFilesShown: false })
+	expect(panelView(state, {}, 3000, 20, {}).groups[0].rows[0].isFilesShown).toBe(false)
+	expect(agentAccent(state, 'a1')).toBe(ACCENTS[0])
+	expect(agentAccent(state, 'gone')).toBe(agentAccent(state, 'main'))
+	expect(pulseAt(1000)).toBe(0.55)
 })

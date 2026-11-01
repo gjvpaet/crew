@@ -106,6 +106,9 @@ export type RowView = {
 	pose: Pose
 	// How far a running card's border has breathed toward its accent, 0 to PULSE.strength; null when it does not run.
 	pulse: number | null
+	// How many files the agent touched, and whether the Files pane shows them: the card's chevron.
+	fileCount: number
+	isFilesShown: boolean
 	sprite: SpriteCell[][]
 }
 
@@ -159,6 +162,12 @@ function accentOf(agent: AgentRecord, state: CrewState): string {
 	return ACCENTS[slotOf(agent, state) % ACCENTS.length]
 }
 
+// The colour of an agent's card by its key, Main's blue for one no longer listed.
+export const agentAccent = (state: CrewState, id: string) => {
+	const agent = state.agents[id]
+	return agent ? accentOf(agent, state) : PALETTE.body
+}
+
 // The same slot as the colour, so a species and its colour travel together and neighbours never look alike.
 const speciesOf = (agent: AgentRecord, state: CrewState): Species =>
 	agent.id === MAIN ? 'pip' : SPECIES_ORDER[slotOf(agent, state) % SPECIES_ORDER.length]
@@ -166,7 +175,7 @@ const speciesOf = (agent: AgentRecord, state: CrewState): Species =>
 // A running card's border breathes: a two-second cycle, at its peak a little over halfway from rest to the accent.
 export const PULSE = { cycleMs: 2000, strength: 0.55 }
 
-const pulseAt = (now: number) => ((1 - Math.cos((2 * Math.PI * now) / PULSE.cycleMs)) / 2) * PULSE.strength
+export const pulseAt = (now: number) => ((1 - Math.cos((2 * Math.PI * now) / PULSE.cycleMs)) / 2) * PULSE.strength
 
 // The terminal's border at rest, which the pulse blends from: the graphical surfaces fade the accent in instead.
 const TERMINAL_REST = [0x5f, 0x5e, 0x5a]
@@ -185,7 +194,7 @@ export function pulseColor(accent: string, pulse: number, surface: 'graphical' |
 
 const POSES: Record<Tone, Pose> = { running: 'running', waiting: 'paused', done: 'still', failed: 'stopped' }
 
-export type PanelOptions = { sprites?: boolean }
+export type PanelOptions = { sprites?: boolean; filesFor?: string | null }
 
 function rowView(
 	agent: AgentRecord,
@@ -243,6 +252,9 @@ function rowView(
 		species,
 		pose,
 		pulse: tone === 'running' ? pulseAt(now) : null,
+		// `?.`: a model saved before files were tracked has no `files` until its next event.
+		fileCount: state.files?.[agent.id]?.length ?? 0,
+		isFilesShown: options.filesFor === agent.id,
 		// The terminal redraws each second while anything runs: the second's parity is a running mascot's beat.
 		sprite:
 			options.sprites === false
