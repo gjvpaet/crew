@@ -79,9 +79,21 @@ Recorded in Crew's existing `tool.call` hook, after `next(e)`, only when the cal
 |---|---|
 | `Read` (`file_path`) | `read`, unless the entry is already `edited` or `committed` |
 | `Edit`, `Write` (`file_path`), `NotebookEdit` (`notebook_path`) | `edited`, including from `committed` |
+| Any foreground `Bash` command the engine doesn't mark read-only | each file it changed: `edited` (the Bash scan below) |
 | `Bash` (by any agent) whose `command` runs `git commit` and succeeds, not `run_in_background` | the git check below, over every agent's files |
 
-Grep, Glob and other Bash commands are not tracked.
+Grep and Glob hits and reads through `cat` or `sed -n` are not tracked.
+
+**Bash scan.** Agents often edit through Bash (`sed -i`, a heredoc'd script, `cat >`), which the file tools never see.
+1. **Marker:** before a foreground Bash call, Crew makes a marker file with `mktemp -t crew-mark.XXXXXX` (a template GNU accepts; macOS takes it as a prefix). If that fails, it skips the scan; it never delays or blocks the command.
+2. **Afterwards, in the background,** unless the call was denied or the engine marked it read-only (`isReadOnly`, as for `ls`):
+   - **Directory:** a leading `cd <path>` (`&&`, `;` or a newline after it; `~` and relative paths resolved) is where the command worked; otherwise the session folder.
+   - **Repository only:** the repository top comes from `rev-parse --show-cdup`. Outside a repository nothing is scanned, since that could be the home folder.
+   - **Scan:** `find <top> ( -name .git -o -name node_modules -o … ) -prune -o -type f -newer <marker> -print0`, 5 s, pruning `.git node_modules .next .nuxt .svelte-kit dist build out coverage .turbo .cache .parcel-cache .venv venv __pycache__ target .gradle .idea`.
+   - **Ignored files:** paths git ignores (`check-ignore -z --stdin`) are dropped. More than 100 left means an install or a build, so nothing is recorded.
+   - **Record:** each remaining file becomes an `edited` touch for the agent that ran the command.
+   - **Clean up:** the marker is always removed.
+3. **Commit check:** for a command that also commits, the git check runs after the scan, so the files it just changed can turn green.
 
 **Commit detection.** `isGitCommit(command)` is a word-split heuristic that ignores quoting. It is true when some `git` invocation in the command (split on `&&`, `||`, `;`, `|` and newlines), after any leading `NAME=value` words and global options (`-C dir`, `-c k=v`, `--git-dir x`, `--no-pager`, …), has `commit` as its subcommand. `git log --grep commit`, `echo git commit` and `git commit-tree` are false. A false positive only costs one extra check.
 
@@ -96,6 +108,7 @@ Grep, Glob and other Bash commands are not tracked.
 Every git call is `git --no-optional-locks -C <dir> …` (so it never takes `index.lock` from under the agent's next git command), through `$.process.run` with a 5 s timeout. Any failure skips that top and leaves its files `edited`.
 
 **Known limits.**
+- The Bash scan attributes every file changed in the repository while the command ran to the agent that ran it, so a write by another agent, a dev server or an editor in that window lands on it too. On a filesystem with 1-second timestamps, a file written in the same second as the marker is missed. Deleted files are not seen.
 - A file whose deletion was committed (`git rm x && git commit`) stays `edited`: git no longer tracks it.
 - With an agent's clean files in several repositories, the SHA of its last clean path's repository is shown.
 
@@ -133,12 +146,12 @@ A `committed` event that changes nothing returns the same state object.
 
 | File | Responsibility |
 |---|---|
-| `hooks/files.ts` (new, pure) | `applyTouch`, `applyCommitted` (state rules, caps, the `until` guard); `latestOf`; `touchOf`; `posix`; `dirname`; `fileTree(entries, root)` → rows (`dir` or `file`, each with `key`, `prefix` guides and `name`) with merged folders and the outside-project branch; `headline(entries, status, root)` → `{ label, line, where }` (label `RIGHT NOW`, `WAITING` or `DONE`); `isGitCommit(command)`; `dirtyPaths(porcelainZ)`; `joinUp(dir, cdup)`; `openCommand(platform, path, isExecutable)` |
+| `hooks/files.ts` (new, pure) | `applyTouch`, `applyCommitted` (state rules, caps, the `until` guard); `latestOf`; `touchOf`; `posix`; `dirname`; `fileTree(entries, root)` → rows (`dir` or `file`, each with `key`, `prefix` guides and `name`) with merged folders and the outside-project branch; `headline(entries, status, root)` → `{ label, line, where }` (label `RIGHT NOW`, `WAITING` or `DONE`); `isGitCommit(command)`; `dirtyPaths(porcelainZ)`; `joinUp(dir, cdup)`; `openCommand(platform, path, isExecutable)`; `cdTarget(command, home)`, `changedFiles(stdout, cap, ignored)`, `SCAN_PRUNE` for the Bash scan |
 | `hooks/tracker.ts` | `touch` and `committed` events delegating to `files.ts`; `EMPTY_STATE` gains `files: {}`, `lastCommit: {}`; a new prompt drops files with their cards |
 | `hooks/files-pane.tsx` (new) | `registerFilesPane(on)`: the `ui.render` hook for `crew-files`, `ui.close` (matched on its id) clearing `filesFor`, `showFiles($, key)` (open, switch or close), the platform check and the safe `openFile`, the live row's pulse |
 | `hooks/view.ts` | `RowView` gains `fileCount` and `isFilesShown`; exports `agentAccent`, `pulseAt`, `GRAPHICAL_REST_ALPHA` |
 | `hooks/panel.tsx` | the chevron button on the card's title row and the line row; pressing it calls `showFiles` |
-| `hooks/register.tsx` | `tool.call` dispatches `touch` events and, for a finished commit by any agent, runs `checkCommit` over every agent's edited files and dispatches one `committed` per agent with clean files; registers the Files pane. The existing ticker already redraws every `ui.render` hook while an agent runs, so the pulse needs no change |
+| `hooks/register.tsx` | `tool.call` dispatches `touch` events, marks and scans foreground Bash calls for the files they changed, and, for a finished commit by any agent, runs `checkCommit` over every agent's edited files and dispatches one `committed` per agent with clean files; registers the Files pane. The existing ticker already redraws every `ui.render` hook while an agent runs, so the pulse needs no change |
 | `types/index.d.ts` | `FileState`, `FileEntry`, `files`, `lastCommit`, `filesFor` |
 | `scripts/test-one.sh` (new) | runs only the named test files, from a scratch copy of the mod |
 
@@ -186,6 +199,7 @@ Run one test file at a time (`scripts/test-one.sh <file>`).
   - **Clicking a file:**
     - open, and a failed open;
     - reveal by executable bit, by symlink, and when the check fails.
+  - **Bash scan:** a heredoc'd script's edits recorded; no leading cd uses the session folder; a relative cd; outside a repository nothing is scanned; past 100 files nothing is recorded; ignored files dropped (and kept when check-ignore exits 1, fails or throws); background and read-only commands not scanned; a failed `mktemp` never stops the command; a failed command still scanned; edit-and-commit turns its files green.
   - **Commits:**
     - a commit turns only clean, tracked files green and shows the SHA;
     - Main committing turns a sub-agent's clean files green too, with the SHA in both panes, and leaves another agent's dirty file edited;
@@ -196,4 +210,4 @@ Run one test file at a time (`scripts/test-one.sh <file>`).
 
 ## Out of scope
 
-Grep/Glob hits, Bash-parsed reads, uncommitted-change line counts, diffs, previews, a whole-project tree, and switching agents from inside the Files pane.
+Grep/Glob hits, reads through Bash, uncommitted-change line counts, diffs, previews, a whole-project tree, and switching agents from inside the Files pane.
