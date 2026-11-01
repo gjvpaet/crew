@@ -16,6 +16,7 @@ import {
 	openCommand,
 	posix,
 	rightNow,
+	SHINE_STEP_MS,
 	shineColors,
 	touchOf,
 	touchedRows,
@@ -350,8 +351,6 @@ test('right now names the live file with its folder and counts while the agent r
 		icon: 'pencil',
 		title: 'Editing PriceTable.jsx',
 		subtitle: 'src/pricing  +12 \u22123',
-		added: 12,
-		removed: 3,
 		totals: { added: 12, removed: 3 },
 		repoTop: null
 	})
@@ -359,9 +358,7 @@ test('right now names the live file with its folder and counts while the agent r
 		tone: 'read',
 		icon: 'eye',
 		title: 'Reading a.js',
-		subtitle: '',
-		added: 0,
-		removed: 0
+		subtitle: ''
 	})
 	expect(rightNow([entry('/repo/a.js', 'committed')], 'running', '/repo', {}, {})).toMatchObject({
 		tone: 'committed',
@@ -419,11 +416,14 @@ test('an ended agent shows DONE, titled by its dominant state and summed by stat
 	expect(rightNow([], 'completed', '/r', {}, {})).toMatchObject({ label: 'DONE', icon: 'check', title: 'No files yet', subtitle: '' })
 })
 
-test('right now totals the counts of every file and shows the latest file’s own', () => {
+test('right now totals the counts of every file the agent has', () => {
 	const files = [entry('/r/a', 'edited', 1), entry('/r/b', 'edited', 2), entry('/r/c', 'read', 3)]
 	const lines: Record<string, [number, number]> = { '/r/a': [10, 1], '/r/b': [2, 4], '/r/gone': [99, 99] }
-	expect(rightNow(files, 'running', '/r', lines, {})).toMatchObject({ added: 0, removed: 0, totals: { added: 12, removed: 5 } })
-	expect(rightNow(files.slice(0, 2), 'completed', '/r', lines, {})).toMatchObject({ added: 2, removed: 4, totals: { added: 12, removed: 5 } })
+	const now = rightNow(files, 'running', '/r', lines, {})
+	expect(now.totals).toEqual({ added: 12, removed: 5 })
+	// The latest file's own counts ride in the subtitle only.
+	expect('added' in now || 'removed' in now).toBe(false)
+	expect(rightNow(files.slice(0, 2), 'completed', '/r', lines, {}).totals).toEqual({ added: 12, removed: 5 })
 })
 
 test('the repository is the longest known top above the latest file', () => {
@@ -444,17 +444,27 @@ test('the repository is the longest known top above the latest file', () => {
 	expect(rightNow([entry('/repo/packages/app/a', 'read', 2), entry('/repo/b', 'read', 1)], 'completed', '/repo', {}, repos).repoTop).toBe('/repo/packages/app')
 })
 
-test('the terminal shine gives each letter a colour, with a 3-letter band moving every 120 ms', () => {
+test('the terminal shine gives each letter a colour, with a 3-letter band moving a letter per redraw', () => {
+	// The running ticker redraws every 200 ms, so the band steps as often and never skips a letter.
+	expect(SHINE_STEP_MS).toBe(200)
 	const colors = (now: number) => shineColors('abcdef', now, 'B', 'W')
 	expect(colors(0)).toEqual(['W', 'W', 'W', 'B', 'B', 'B'])
-	expect(colors(119)).toEqual(colors(0))
-	expect(colors(120)).toEqual(['B', 'W', 'W', 'W', 'B', 'B'])
+	expect(colors(199)).toEqual(colors(0))
+	expect(colors(200)).toEqual(['B', 'W', 'W', 'W', 'B', 'B'])
 	// The band wraps past the last letter, and the sweep repeats after one pass.
-	expect(colors(120 * 4)).toEqual(['W', 'B', 'B', 'B', 'W', 'W'])
-	expect(colors(120 * 5)).toEqual(['W', 'W', 'B', 'B', 'B', 'W'])
-	expect(colors(120 * 6)).toEqual(colors(0))
+	expect(colors(200 * 4)).toEqual(['W', 'B', 'B', 'B', 'W', 'W'])
+	expect(colors(200 * 5)).toEqual(['W', 'W', 'B', 'B', 'B', 'W'])
+	expect(colors(200 * 6)).toEqual(colors(0))
 	expect(shineColors('', 500, 'B', 'W')).toEqual([])
-	expect(shineColors('ab', 0, 'B', 'W')).toEqual(['W', 'W'])
+	expect(shineColors('abcd', 0, 'B', 'W')).toEqual(['W', 'W', 'W', 'B'])
+})
+
+test('a name under 4 letters is too short for a band and stays plain', () => {
+	for (const now of [0, 200, 400, 600]) {
+		expect(shineColors('abc', now, 'B', 'W')).toEqual(['B', 'B', 'B'])
+		expect(shineColors('ab', now, 'B', 'W')).toEqual(['B', 'B'])
+		expect(shineColors('a', now, 'B', 'W')).toEqual(['B'])
+	}
 })
 
 test('numstat reads added and removed counts by path, a binary file as 0 and 0', () => {

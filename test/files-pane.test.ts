@@ -235,20 +235,32 @@ test('the Files pane draws the Right-now card and a flat list of touched files, 
 	await pane.unmount()
 })
 
-test('on Desktop only the live name shines, as an SVG, beside a pressable folder', async ($, on) => {
+test('on Desktop only the live name shines, as an SVG, with a small open mark of its own', async ($, on) => {
 	await start($, on)
 	await $.tool.call(read('/repo/README.md', 'a1'))
 	await $.tool.call(edit('/repo/src/PriceTable.jsx', 'a1'))
 	const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
 	await pane.press({ key: 'files-a1' })
 	const files = await $.ui.mount({ ...FILES, surface: 'desktop' })
-	const [shine, open] = await nameCell(files, '/repo/src/PriceTable.jsx')
+	const [shine, folder] = await nameCell(files, '/repo/src/PriceTable.jsx')
 	expect(shine.type).toBe('Svg')
 	expect(shine.props.alt).toBe('PriceTable.jsx')
 	expect(shine.props.isInteractive).toBe(true)
 	expect(shine.props.source).toContain('@keyframes')
+	// The folder is plain dim text, as on every other row.
+	expect(folder.type).toBe('Text')
+	expect(folder.props.dimColor).toBe(true)
+	expect(shown(folder)).toBe('src')
+	// The press is a ↗ outside the name cell, which the name cannot squeeze, named after the file.
+	const row = await cells(files, 'file:/repo/src/PriceTable.jsx')
+	const open = row[2]
+	expect(open.type).toBe('Button')
 	expect(open.props.key).toBe('open-/repo/src/PriceTable.jsx')
 	expect(open.props.label).toBe('PriceTable.jsx')
+	expect(open.props.dimColor).toBe(true)
+	expect(shown(open.children[0])).toBe('\u2197')
+	// Another row's name is still its own Button.
+	expect((await nameCell(files, '/repo/README.md'))[0].props.key).toBe('open-/repo/README.md')
 	expect(await pillOf(files, '/repo/src/PriceTable.jsx')).toBe('editing')
 	// The other rows draw no SVG; the Right-now icon is the only other one.
 	expect((await nameCell(files, '/repo/README.md')).some((cell: any) => cell.type === 'Svg')).toBe(false)
@@ -335,6 +347,26 @@ test('an idle agent shows WAITING in amber with a pause', async ($, on) => {
 	await pane.unmount()
 })
 
+test('the flash settles even when nothing runs to redraw the pane', async ($, on) => {
+	const { clock } = await start($, on)
+	await $.tool.call(read('/repo/a.js', 'a1'))
+	const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	await pane.press({ key: 'files-a1' })
+	const ended = { answer: '', durationMs: 1, isAborted: false, reason: 'answer' }
+	for (const agentId of ['a1', 'a2']) await $.turn.complete({ turnId: 'x', agentId, ...ended } as any)
+	await $.turn.complete({ turnId: 't1', ...ended } as any)
+	await clock.advance(5000)
+	const files = await $.ui.mount({ ...FILES, surface: 'desktop' })
+	expect((await files.find({ key: 'now' }))?.props.borderColor).toBeUndefined()
+	// A late touch, as a slow Bash scan lands after the turn has ended.
+	await $.tool.call(read('/repo/b.js', 'a1'))
+	expect((await files.find({ key: 'now' }))?.props.borderColor).toBe('#E8E6DF')
+	await clock.advance(1500)
+	expect((await files.find({ key: 'now' }))?.props.borderColor).toBeUndefined()
+	await files.unmount()
+	await pane.unmount()
+})
+
 test('the Right-now card flashes its outline right after a touch, then settles', async ($, on) => {
 	const { clock } = await start($, on)
 	await $.tool.call(read('/repo/a.js', 'a1'))
@@ -402,7 +434,7 @@ test('a long list of edits with line counts and a branch stays inside the budget
 	await pane.press({ key: 'files-a1' })
 	const files = await $.ui.mount({ ...FILES, surface: 'desktop' })
 	expect(await files.find({ key: 'branch' })).toBeDefined()
-	expect(shown((await cells(files, 'file:/repo/src/f299.js'))[2])).toBe('+12')
+	expect(shown((await cells(files, 'file:/repo/src/f298.js'))[2])).toBe('+12')
 	const measured = desktopMeasure(await files.drawn())
 	expect(measured.nodes).toBeLessThan(2000)
 	expect(measured.depth).toBeLessThan(32)
@@ -1086,9 +1118,10 @@ test('once git has answered, the rows show their line counts and the card its br
 	await pane.press({ key: 'files-a1' })
 	for (const surface of ['desktop', 'terminal'] as const) {
 		const files = await $.ui.mount({ ...FILES, surface })
-		const row = await cells(files, 'file:/repo/a.js')
-		expect([shown(row[2]), shown(row[3])]).toEqual(['+12', '\u22123'])
-		expect([row[2].props.color, row[3].props.color]).toEqual(['#7FC77F', '#F07A7A'])
+		// The live row's counts sit just before its pill (past Desktop's open mark).
+		const [added, removed] = (await cells(files, 'file:/repo/a.js')).slice(-3, -1)
+		expect([shown(added), shown(removed)]).toEqual(['+12', '\u22123'])
+		expect([added.props.color, removed.props.color]).toEqual(['#7FC77F', '#F07A7A'])
 		// A row with no counts draws none.
 		expect(await cells(files, 'file:/repo/b.md')).toHaveLength(3)
 		// At the project root the subtitle is the counts alone.
@@ -1117,4 +1150,48 @@ test('a clean repository and a detached HEAD read as such on the branch row', as
 	expect(shown(branch[2])).toBe('clean')
 	await files.unmount()
 	await pane.unmount()
+})
+
+test('edits in many folders ask git for each folder’s repository once, not once per edit', async ($, on) => {
+	const dirs = Array.from({ length: 20 }, (_, i) => `/repo/d${i}`)
+	const { clock, ran } = await start($, on, {
+		stdout: { ...REFRESH, ...Object.fromEntries(dirs.map(dir => [`${GIT} ${dir} rev-parse --show-cdup`, '../\n'])) }
+	})
+	for (const dir of dirs) await $.tool.call(edit(`${dir}/a.js`, 'a1'))
+	await clock.settle()
+	const cdups = ran.filter(argv => argv.includes('--show-cdup'))
+	expect(cdups.length).toBeLessThanOrEqual(dirs.length)
+	expect(new Set(cdups.map(argv => argv[3])).size).toBe(cdups.length)
+	// Every file was still asked about.
+	expect(numstats(ran).flatMap(args => args.slice(args.indexOf('--') + 1))).toContain('/repo/d19/a.js')
+})
+
+test('a commit refreshes its files in the repository it checked, without asking for it again', async ($, on) => {
+	const { clock, ran } = await start($, on, {
+		stdout: {
+			...REFRESH,
+			[`${GIT} /repo/src rev-parse --show-cdup`]: '../\n',
+			[`${GIT} /repo status`]: '',
+			[`${GIT} /repo ls-files`]: 'src/a.js\0',
+			[`${GIT} /repo rev-parse --short HEAD`]: 'abc1234\n'
+		}
+	})
+	await $.tool.call(edit('/repo/src/a.js', 'a1'))
+	await clock.settle()
+	await $.tool.call({ tool: 'Bash', command: 'git commit -am x', agentId: 'a1' } as any)
+	await clock.settle()
+	expect(ran.filter(argv => argv.includes('--show-cdup') && argv[3] === '/repo/src')).toHaveLength(1)
+	expect(numstats(ran).at(-1)).toEqual(['diff', '--numstat', '-z', 'HEAD', '--', '/repo/src/a.js'])
+})
+
+test('the Bash scan hands the repository it found straight to the refresh', async ($, on) => {
+	const { clock, ran } = await start($, on, {
+		stdout: { ...REFRESH, mktemp: `${MARK}\n`, 'find /repo': found('/repo/lib/deep/x.ts', '/repo/y.ts') }
+	})
+	await $.tool.call(bash("sed -i '' s/a/b/ lib/deep/x.ts y.ts", 'a1'))
+	await clock.settle()
+	// Only the scan's own folder is asked; the folders of the files it found are not.
+	expect(ran.filter(argv => argv.includes('--show-cdup')).map(argv => argv[3])).toEqual(['/repo'])
+	expect(numstats(ran)).toHaveLength(1)
+	expect(numstats(ran)[0].slice(-2).sort()).toEqual(['/repo/lib/deep/x.ts', '/repo/y.ts'])
 })

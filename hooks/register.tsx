@@ -3,8 +3,20 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { AgentStatusView, MascotPrefs } from '../types'
 import { registerBand } from './band'
-import { SCAN_PRUNE, cdTarget, changedFiles, dirname, dirtyPaths, isGitCommit, joinUp, numstat, posix, touchOf } from './files'
-import { registerFilesPane } from './files-pane'
+import {
+	SCAN_PRUNE,
+	SHINE_STEP_MS,
+	cdTarget,
+	changedFiles,
+	dirname,
+	dirtyPaths,
+	isGitCommit,
+	joinUp,
+	numstat,
+	posix,
+	touchOf
+} from './files'
+import { isFlashing, registerFilesPane } from './files-pane'
 import { SET_MASCOT_SPEC, SET_MASCOT_TOOL, applyMascotChange, parseMascotInput, sanitizeMascots } from './mascot'
 import { isMoving, openPane, registerPanel, syncPaneShown } from './panel'
 import { TASK_TOOLS } from './tasks'
@@ -16,13 +28,14 @@ const isBandHidden = atom({ plugin: 'crew', key: 'isBandHidden' } as const, fals
 const mascots = atom({ plugin: 'crew', key: 'mascots' } as const, {} as MascotPrefs)
 const hasAutoOpened = atom({ plugin: 'crew', key: 'hasAutoOpened' } as const, false)
 const groupOpen = atom({ plugin: 'crew', key: 'groupOpen' } as const, {} as Record<string, boolean>)
+const filesFor = atom({ plugin: 'crew', key: 'filesFor' } as const, null as string | null)
 
 // The clock beats ten times a second. While a card moves between groups every beat redraws, so its slide steps
-// along; while an agent runs every second beat does, so its card border breathes; otherwise once a second, for the
-// elapsed times.
+// along; while an agent runs every second beat does, so its card border breathes and the terminal's shine steps a
+// letter; otherwise once a second, for the elapsed times.
 const BEAT_MS = 100
 const BEATS_PER_SECOND = 10
-const BEATS_PER_PULSE = 2
+const BEATS_PER_PULSE = SHINE_STEP_MS / BEAT_MS
 
 // Sub-agents keep no task list of their own unless asked, which leaves their bars nothing to measure. Each one is
 // asked, after its task, to keep a short one: Crew reads it off the task-list tool calls as the agent's steps.
@@ -69,12 +82,16 @@ async function dropFinishedFold($: EngineInterface) {
 	await update($, groupOpen, ({ Finished: _dropped, ...rest } = {}) => rest)
 }
 
-// Redraw the pane and band at the rate what is on them needs: a move, a breathing border, or a counting clock.
+// Redraw the pane and band at the rate what is on them needs: a move, a breathing border, a counting clock, or the
+// Files pane's flash, which must be redrawn away even when nothing else is. The flash is asked about a pulse late, so
+// the redraw after it ends, which clears it, still comes.
 async function tick($: EngineInterface, beat: number) {
 	const state = await read($, model)
+	const now = await $.clock.now()
+	const isFlashDue = () => read($, filesFor).then(key => isFlashing(state, key, now - BEAT_MS * BEATS_PER_PULSE))
 	const isDue =
-		isMoving(await $.clock.now()) ||
-		(beat % BEATS_PER_PULSE === 0 && isPulsing(state)) ||
+		isMoving(now) ||
+		(beat % BEATS_PER_PULSE === 0 && (isPulsing(state) || (await isFlashDue()))) ||
 		(beat % BEATS_PER_SECOND === 0 && isTicking(state))
 	if (isDue) $.ui.invalidate('ui.render')
 }
@@ -153,10 +170,9 @@ async function recordBashEdits($: EngineInterface, command: string, agentId: str
 	const cwd = posix(await $.session.cwd())
 	const target = cdTarget(command, await $.env.get('HOME'))
 	const dir = target === null ? cwd : target.startsWith('/') ? target : joinUp(cwd, target)
-	const up = await $.process.run(['git', '--no-optional-locks', '-C', dir, 'rev-parse', '--show-cdup'], { timeoutMs: GIT_MS })
+	const top = await topOf($, dir)
 	// Never scan outside a repository: that could be the home folder.
-	if (up.exitCode !== 0) return
-	const top = joinUp(dir, up.stdout.trim())
+	if (top === null) return
 	const prune = SCAN_PRUNE.flatMap((name, at) => (at === 0 ? ['-name', name] : ['-o', '-name', name]))
 	const scan = await $.process.run(
 		['find', top, '(', ...prune, ')', '-prune', '-o', '-type', 'f', '-newer', marker, '-print0'],
@@ -170,7 +186,10 @@ async function recordBashEdits($: EngineInterface, command: string, agentId: str
 		await apply($, { kind: 'touch', at: await $.clock.now(), agentId, path, touch: 'edit' })
 		isEdited = true
 	}
-	if (isEdited) refreshGit($, await workedOn($, agentId))
+	if (!isEdited) return
+	// The repository is known already: the agent's files in it go straight to its refresh.
+	const prefix = top.endsWith('/') ? top : `${top}/`
+	askTop($, top, (await workedOn($, agentId)).filter(path => path.startsWith(prefix)))
 }
 
 const GIT_MS = 5_000
@@ -207,13 +226,35 @@ async function refreshTop($: EngineInterface, top: string, paths: string[]) {
 	}
 }
 
+// Each folder's repository top, or null outside one, asked once: an edit burst across many folders would otherwise
+// ask git again for every folder the agent ever touched. Held as the pending answer, so two asks in a row share one
+// call. Module-level, so a reload (or a new session) asks afresh; a call that could not start is not remembered.
+const tops = new Map<string, Promise<string | null>>()
+
+function topOf($: EngineInterface, dir: string): Promise<string | null> {
+	const known = tops.get(dir)
+	if (known) return known
+	const asked = gitIn($, dir, ['rev-parse', '--show-cdup']).then(
+		// Not in a repository, or a directory since deleted: nothing to ask.
+		up => (up.exitCode === 0 ? joinUp(dir, up.stdout.trim()) : null),
+		() => {
+			tops.delete(dir)
+			return null
+		}
+	)
+	tops.set(dir, asked)
+	return asked
+}
+
 // Per repository top: the refresh in flight, and the paths asked for since it began. Module-level, so a reload starts clean.
 type Flight = { queued?: Set<string> }
 const flights = new Map<string, Flight>()
 
 // At most one refresh runs per top; asking again meanwhile queues one more, which unions every path asked for
 // and starts when the running one ends. An edit burst therefore costs two runs, not one per edit.
-function askTop($: EngineInterface, top: string, paths: Iterable<string>) {
+function askTop($: EngineInterface, top: string, asked: Iterable<string>) {
+	const paths = [...asked]
+	if (paths.length === 0) return
 	const flight = flights.get(top)
 	if (flight) {
 		flight.queued = new Set([...(flight.queued ?? []), ...paths])
@@ -222,10 +263,20 @@ function askTop($: EngineInterface, top: string, paths: Iterable<string>) {
 	const mine: Flight = {}
 	flights.set(top, mine)
 	// refreshTop never rejects, so the flight always ends and the top is never stuck.
-	void refreshTop($, top, [...paths]).then(() => {
+	void refreshTop($, top, paths).then(() => {
 		flights.delete(top)
 		if (mine.queued) askTop($, top, mine.queued)
 	})
+}
+
+// The paths grouped by their repository top; those outside any repository are left out.
+async function byTop($: EngineInterface, paths: readonly string[]): Promise<Map<string, string[]>> {
+	const grouped = new Map<string, string[]>()
+	for (const dir of new Set(paths.map(dirname))) {
+		const top = await topOf($, dir)
+		if (top !== null) grouped.set(top, [...(grouped.get(top) ?? []), ...paths.filter(path => dirname(path) === dir)])
+	}
+	return grouped
 }
 
 // Fire and forget: refreshes the line counts, branch and dirty count git holds for these paths, in the background.
@@ -233,15 +284,7 @@ function askTop($: EngineInterface, top: string, paths: Iterable<string>) {
 function refreshGit($: EngineInterface, paths: string[]) {
 	if (paths.length === 0) return
 	void (async () => {
-		const tops = new Map<string, string[]>()
-		for (const dir of new Set(paths.map(dirname))) {
-			const up = await gitIn($, dir, ['rev-parse', '--show-cdup']).catch(() => null)
-			// Not in a repository, or a directory since deleted: nothing to ask.
-			if (!up || up.exitCode !== 0) continue
-			const top = joinUp(dir, up.stdout.trim())
-			tops.set(top, [...(tops.get(top) ?? []), ...paths.filter(path => dirname(path) === dir)])
-		}
-		for (const [top, list] of tops) askTop($, top, list)
+		for (const [top, list] of await byTop($, paths)) askTop($, top, list)
 	})().catch(() => undefined)
 }
 
@@ -259,17 +302,11 @@ async function checkCommit($: EngineInterface) {
 	const edited = [...new Set(editedBy.flatMap(([, paths]) => paths))]
 	if (edited.length === 0) return
 	const git = (dir: string, ...args: string[]) => gitIn($, dir, args)
-	const tops = new Map<string, string[]>()
-	for (const dir of new Set(edited.map(dirname))) {
-		const up = await git(dir, 'rev-parse', '--show-cdup').catch(() => null)
-		// Not in a repository, or a directory since deleted: those files are left as they are.
-		if (!up || up.exitCode !== 0) continue
-		const top = joinUp(dir, up.stdout.trim())
-		tops.set(top, [...(tops.get(top) ?? []), ...edited.filter(path => dirname(path) === dir)])
-	}
+	// Files outside any repository are left as they are.
+	const repos = await byTop($, edited)
 	// Each clean path with the SHA of its own repository's HEAD, which is unknown if HEAD could not be read.
 	const clean = new Map<string, string | undefined>()
-	for (const [top, paths] of tops) {
+	for (const [top, paths] of repos) {
 		try {
 			const status = await git(top, 'status', '--porcelain', '-z', '--', ...paths)
 			if (status.exitCode !== 0) continue
@@ -290,7 +327,6 @@ async function checkCommit($: EngineInterface) {
 			// One repository that cannot be asked leaves the rest to be checked.
 		}
 	}
-	const marked: string[] = []
 	// An agent with nothing clean gets no event, so no SHA is stamped on it either.
 	for (const [key, paths] of editedBy) {
 		const mine = paths.filter(path => clean.has(path))
@@ -303,10 +339,10 @@ async function checkCommit($: EngineInterface) {
 			paths: mine,
 			...(sha ? { sha } : {})
 		})
-		marked.push(...mine)
 	}
-	// Committed files read [0, 0] now. The refresh comes after the events, and a run already in flight is followed by it.
-	refreshGit($, marked)
+	// Committed files read [0, 0] now. The refresh comes after the events, in the repositories already found, and a run
+	// already in flight is followed by it.
+	for (const [top, paths] of repos) askTop($, top, paths.filter(path => clean.has(path)))
 }
 
 export const register: Register = on => {
@@ -332,6 +368,8 @@ export const register: Register = on => {
 		await $.tool.register(OPEN_PANEL_SPEC)
 		await loadMascots($)
 		await syncPaneShown($)
+		// Another session may work in other folders, or one made a repository since.
+		tops.clear()
 		ticker?.cancel()
 		let beat = 0
 		ticker = $.clock.every(BEAT_MS, () => void tick($, ++beat).catch(() => undefined))

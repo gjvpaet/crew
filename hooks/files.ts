@@ -210,9 +210,6 @@ export type RightNow = {
 	icon: 'eye' | 'pencil' | 'check' | 'pause'
 	title: string
 	subtitle: string
-	// The live or latest file's counts, 0 when unknown.
-	added: number
-	removed: number
 	// Across the agent's files that have counts.
 	totals: { added: number; removed: number }
 	// The repository of the latest touch, when it is one of the known ones.
@@ -249,7 +246,7 @@ export function rightNow(
 			: Object.keys(repos)
 					.filter(top => latest.path.startsWith(top.endsWith('/') ? top : `${top}/`))
 					.reduce<string | null>((best, top) => (best === null || top.length > best.length ? top : best), null)
-	const base = { added, removed, totals, repoTop }
+	const base = { totals, repoTop }
 
 	if (isEndedStatus(status)) {
 		const counts = (['edited', 'committed', 'read'] as const)
@@ -283,11 +280,19 @@ export function rightNow(
 	}
 }
 
-// Terminal shine: one colour per letter, a 3-letter band of `bright` moving one letter per 120 ms across `base`, wrapping.
+// How often the terminal shine's band moves a letter: the rate the ticker redraws while an agent runs, so the band
+// steps once per redraw and never skips a letter. register.tsx beats to it.
+export const SHINE_STEP_MS = 200
+
+const SHINE_BAND = 3
+
+// Terminal shine: one colour per letter, a 3-letter band of `bright` moving a letter per step across `base`, wrapping.
+// A name of 3 letters or fewer would be all band, so it stays plain.
 export function shineColors(text: string, now: number, base: string, bright: string): string[] {
 	const letters = Array.from(text)
-	const start = Math.floor(now / 120) % Math.max(letters.length, 1)
-	return letters.map((_, at) => ((at - start + letters.length) % letters.length < 3 ? bright : base))
+	if (letters.length <= SHINE_BAND) return letters.map(() => base)
+	const start = Math.floor(now / SHINE_STEP_MS) % letters.length
+	return letters.map((_, at) => ((at - start + letters.length) % letters.length < SHINE_BAND ? bright : base))
 }
 
 const toCount = (text: string) => (/^\d+$/.test(text) ? Number(text) : 0)

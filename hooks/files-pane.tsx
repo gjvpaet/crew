@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 
-import type { FileState } from '../types'
+import type { CrewState, FileState } from '../types'
 import {
 	countsText,
 	latestOf,
@@ -37,7 +37,7 @@ const REMOVED_COLOR = '#F07A7A'
 const QUIET_COLOR = '#8B949E'
 // The card's outline right after a touch, so a new file is noticed from the corner of an eye.
 const FLASH_COLOR = '#E8E6DF'
-const FLASH_MS = 1200
+export const FLASH_MS = 1200
 const CHIP_COLORS: Record<ChipTone, string> = { code: '#E3B341', docs: '#58A6FF', data: '#56D364', other: QUIET_COLOR }
 
 const ICON_PX = 36
@@ -61,6 +61,13 @@ const badge = (hex: string, surface: Surface) =>
 const NB = '\u00a0'
 const chipText = (label: string) => `${NB}${label.padEnd(4, NB)}${NB}`
 const pillText = (pill: string) => `${NB}${pill}${NB}`
+
+// True while the agent's latest touch is new enough to light the card; the ticker redraws until it is not, since
+// nothing else may (a slow Bash scan's touch can land after every agent has ended).
+export function isFlashing(state: CrewState, key: string | null, now: number) {
+	const latest = key ? latestOf(state.files?.[key] ?? []) : undefined
+	return latest !== undefined && now - latest.at < FLASH_MS
+}
 
 const titleOf = (description: string | undefined) => `Files · ${description ?? 'Agent'}`
 
@@ -167,8 +174,6 @@ export function registerFilesPane(on: On) {
 		const card = rightNow(entries, status, root, lines, repos)
 		const rows = touchedRows(entries, root, status, lines)
 		const repo = card.repoTop === null ? undefined : repos[card.repoTop]
-		const latest = latestOf(entries)
-		const isFlashing = latest !== undefined && now - latest.at < FLASH_MS
 		const labelColor = card.tone === 'waiting' ? WAITING_COLOR : STATE_COLORS[card.tone]
 		const legend: FileState[] = entries.some(item => item.state === 'committed')
 			? ['read', 'edited', 'committed']
@@ -211,8 +216,15 @@ export function registerFilesPane(on: On) {
 			</Box>
 		)
 
-		const openButton = (row: TouchedRow, children: JSX.Element | JSX.Element[]) => (
-			<Button key={`open-${row.path}`} plain label={row.name} onPress={() => openFile($, row.path)}>
+		// `isMark`: the live row's dim ↗, which stands in for its name as what a press opens.
+		const openButton = (row: TouchedRow, children: JSX.Element | JSX.Element[], isMark = false) => (
+			<Button
+				key={`open-${row.path}`}
+				plain
+				{...(isMark ? { dimColor: true } : {})}
+				label={row.name}
+				onPress={() => openFile($, row.path)}
+			>
 				{children}
 			</Button>
 		)
@@ -224,8 +236,7 @@ export function registerFilesPane(on: On) {
 		)
 
 		// The live file's name is lit by a band sweeping across it: an animated SVG where the surface draws one, a colour
-		// per letter in the terminal, the band moving a letter at each redraw. An SVG cannot sit in a Button, so on a
-		// graphical surface the live row's press lands on the folder beside the name.
+		// per letter in the terminal, the band moving a letter at each redraw.
 		const nameParts = (row: TouchedRow) => {
 			const base = STATE_COLORS[row.state]
 			if (!row.isLive) return [openButton(row, <Text weight="semibold">{row.name}</Text>), folder(row)]
@@ -233,7 +244,7 @@ export function registerFilesPane(on: On) {
 				const shine = shineSvg(row.name, base)
 				return [
 					<Svg source={shine.source} alt={row.name} width={shine.width} height={shine.height} isInteractive />,
-					openButton(row, folder(row))
+					folder(row)
 				]
 			}
 			const colors = shineColors(row.name, now, base, brighter(base))
@@ -267,6 +278,9 @@ export function registerFilesPane(on: On) {
 				<Box key="name" flexDirection="row" gap={1} flexGrow={1} width={0}>
 					{nameParts(row)}
 				</Box>
+				{/* An SVG cannot sit in a Button, so the shining name opens through a mark of its own, outside the name cell
+				    so a long name never squeezes it away. */}
+				{row.isLive && Svg && openButton(row, <Text>{'\u2197'}</Text>, true)}
 				{counts(row.added, row.removed)}
 				<Text {...badge(STATE_COLORS[row.state], surface)}>{pillText(row.pill)}</Text>
 			</Box>
@@ -278,7 +292,7 @@ export function registerFilesPane(on: On) {
 					key="now"
 					flexDirection="column"
 					borderStyle="round"
-					{...(isFlashing ? { borderColor: FLASH_COLOR } : {})}
+					{...(isFlashing(state, key, now) ? { borderColor: FLASH_COLOR } : {})}
 					paddingX={1}
 					marginBottom={1}
 				>
