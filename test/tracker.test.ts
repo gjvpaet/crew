@@ -509,3 +509,51 @@ test("an ended sub-agent's files and SHA survive its resume", () => {
 	expect(state.files.a1).toEqual([{ path: '/repo/a.js', state: 'committed', at: 3000 }])
 	expect(state.lastCommit.a1).toBe('a1c9e42')
 })
+
+const git = (lines: Record<string, [number, number]>, repos = {}): CrewEvent => ({ kind: 'git', lines, repos })
+
+test('a git event merges line counts and repositories, and a clean file leaves the counts', () => {
+	const state = run([
+		...START,
+		git({ '/repo/a.js': [12, 3], '/repo/b.js': [1, 0] }, { '/repo': { branch: 'feat/pricing', changed: 2 } }),
+		git({ '/repo/b.js': [0, 0], '/repo/c.js': [0, 4] }, { '/other': { branch: null, changed: 0 } })
+	])
+	expect(state.lines).toEqual({ '/repo/a.js': [12, 3], '/repo/c.js': [0, 4] })
+	expect(state.repos).toEqual({ '/repo': { branch: 'feat/pricing', changed: 2 }, '/other': { branch: null, changed: 0 } })
+	// A newer answer replaces the older one.
+	expect(reduce(state, git({ '/repo/a.js': [13, 3] }, { '/repo': { branch: 'main', changed: 0 } })).lines['/repo/a.js']).toEqual([13, 3])
+})
+
+test('a git event that changes nothing returns the same state', () => {
+	const state = run([...START, git({ '/repo/a.js': [12, 3] }, { '/repo': { branch: 'main', changed: 1 } })])
+	expect(reduce(state, git({ '/repo/a.js': [12, 3] }, { '/repo': { branch: 'main', changed: 1 } }))).toBe(state)
+	// A clean file that was never counted, and an empty event.
+	expect(reduce(state, git({ '/repo/never.js': [0, 0] }))).toBe(state)
+	expect(reduce(state, git({}))).toBe(state)
+	// Only the part that changed is copied.
+	const moved = reduce(state, git({}, { '/repo': { branch: 'main', changed: 0 } }))
+	expect(moved.lines).toBe(state.lines)
+	expect(moved.repos['/repo'].changed).toBe(0)
+})
+
+test('a new prompt prunes line counts to the files still in some agent’s list', () => {
+	const state = run([
+		...START,
+		{ kind: 'touch', at: 3000, agentId: 'a1', path: '/repo/a.js', touch: 'edit' },
+		{ kind: 'touch', at: 3000, agentId: 'a2', path: '/repo/b.js', touch: 'edit' },
+		{ kind: 'touch', at: 3000, path: '/repo/c.js', touch: 'edit' },
+		git({ '/repo/a.js': [1, 1], '/repo/b.js': [2, 2], '/repo/c.js': [3, 3] }, { '/repo': { branch: 'main', changed: 3 } }),
+		{ kind: 'turnEnd', at: 4000, agentId: 'a2', isAborted: false, reason: 'answer' },
+		{ kind: 'turnStart', at: 5000, turnId: 't2', text: 'Next thing' }
+	])
+	expect(state.lines).toEqual({ '/repo/a.js': [1, 1] })
+	// The repositories are kept.
+	expect(state.repos).toEqual({ '/repo': { branch: 'main', changed: 3 } })
+	// A turn no person started prunes nothing.
+	expect(reduce(state, { kind: 'turnStart', at: 6000, turnId: 't2', text: '', isPerson: false }).lines).toBe(state.lines)
+})
+
+test('git events work on state saved before line counts existed', () => {
+	const old = { turn: null, agents: {}, order: [], tasks: [], agentTasks: {}, sessionByModel: {} } as any
+	expect(reduce(old, git({ '/repo/a.js': [1, 0] }, { '/repo': { branch: null, changed: 1 } })).lines).toEqual({ '/repo/a.js': [1, 0] })
+})

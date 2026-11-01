@@ -32,6 +32,8 @@ type Options = {
 	throwing?: string
 	// Whether `ui.open` finds room for a pane; true when left out.
 	isPlaced?: boolean
+	// A `process.run` whose joined argv starts with this waits for `until` before it answers, as a slow command does.
+	slow?: { prefix: string; until: Promise<void> }
 }
 
 const answer = (table: Record<string, string | number> | undefined, argv: string[]) =>
@@ -69,7 +71,10 @@ async function start($: any, on: any, options: Options = {}) {
 		if (options.throwing && argv.join(' ').startsWith(options.throwing)) throw new Error('could not start')
 		const stdout = String(answer(options.stdout, argv) ?? '')
 		const exitCode = Number(answer(options.exits, argv) ?? 0)
-		return { value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+		const value = { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
+		return options.slow && argv.join(' ').startsWith(options.slow.prefix)
+			? options.slow.until.then(() => ({ value }))
+			: { value }
 	})
 	on('session.start', (_: unknown, e: any) => ({ cwd: e.cwd }))
 	on('turn.start', (_: unknown, e: any) => ({ turnId: e.turnId }))
@@ -502,13 +507,13 @@ test('no check, a failed check or nothing clean leaves the files edited and stam
 	await $.tool.call({ tool: 'Bash', command: 'git log --grep commit', agentId: 'a1' } as any)
 	await $.tool.call({ tool: 'Bash', command: 'git commit -am x', run_in_background: true, agentId: 'a1' } as any)
 	await clock.settle()
-	// Neither command is a finished commit, so git was never asked.
-	expect(ran.some(argv => argv[0] === 'git')).toBe(false)
+	// Neither command is a finished commit, so the commit check never ran (the edits' own refresh asks no ls-files).
+	expect(ran.some(argv => argv.includes('ls-files') || (argv.includes('status') && argv.includes('--')))).toBe(false)
 	await $.tool.call({ tool: 'Bash', command: 'git commit -am x', agentId: 'a1' } as any)
 	await clock.settle()
 	// Checked, but nothing turned clean: no HEAD lookup.
 	expect(ran.some(argv => argv.join(' ').startsWith(`${GIT} /repo status`))).toBe(true)
-	expect(ran.some(argv => argv.includes('HEAD'))).toBe(false)
+	expect(ran.some(argv => argv.includes('--short') && argv.includes('rev-parse'))).toBe(false)
 	// An agent whose files sit outside any repository is never asked for a status.
 	await $.tool.call(edit('/elsewhere/c.js', 'a2'))
 	await $.tool.call({ tool: 'Bash', command: 'git commit -am y', agentId: 'a2' } as any)
@@ -537,7 +542,8 @@ test('Main committing turns a sub-agent’s clean edit green too, and every pane
 	await $.tool.call(edit('/repo/README.md'))
 	await $.tool.call({ tool: 'Bash', command: 'git commit -am x' } as any)
 	await clock.settle()
-	const statuses = ran.filter(argv => argv.join(' ').startsWith(`${GIT} /repo status`))
+	// The commit check's status names its files; the refresh's does not.
+	const statuses = ran.filter(argv => argv.join(' ').startsWith(`${GIT} /repo status`) && argv.includes('--'))
 	expect(statuses).toHaveLength(1)
 	expect(statuses[0].slice(-2).sort()).toEqual(['/repo/README.md', '/repo/src/a.js'])
 	const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
@@ -808,4 +814,136 @@ test('a command the engine marks read-only is not scanned, and its marker is rem
 	const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
 	expect(await pane.find({ key: 'files-a1' })).toBeUndefined()
 	await pane.unmount()
+})
+
+// The git refresh behind the Files pane's line counts and branch: what it asks git, and when.
+const gitCalls = (ran: string[][]) => ran.filter(argv => argv[0] === 'git').map(argv => argv.slice(4))
+const subcommands = (ran: string[][]) => gitCalls(ran).map(args => args[0])
+const numstats = (ran: string[][]) => gitCalls(ran).filter(args => args[0] === 'diff')
+// Lets work that has no clock to settle on (a stub held open) run as far as it can.
+const idle = () => new Promise(resolve => setTimeout(resolve, 20))
+
+const REFRESH = {
+	[`${GIT} /repo rev-parse --show-cdup`]: '\n',
+	[`${GIT} /repo diff`]: '12\t3\ta.js\0',
+	[`${GIT} /repo symbolic-ref`]: 'feat/pricing\n',
+	[`${GIT} /repo status`]: ' M a.js\0?? new.js\0'
+}
+
+test('an edit asks git for the numbers, the branch and the dirty files, in that order', async ($, on) => {
+	const { clock, ran } = await start($, on, { stdout: REFRESH })
+	await $.tool.call(edit('/repo/a.js', 'a1'))
+	await clock.settle()
+	expect(subcommands(ran)).toEqual(['rev-parse', 'diff', 'symbolic-ref', 'status'])
+	expect(ran).toContainEqual([
+		'git', '--no-optional-locks', '-C', '/repo', 'diff', '--numstat', '-z', 'HEAD', '--', '/repo/a.js'
+	])
+	expect(gitCalls(ran)[2]).toEqual(['symbolic-ref', '--short', '-q', 'HEAD'])
+	expect(gitCalls(ran)[3]).toEqual(['status', '--porcelain', '-z'])
+	// A Write and the agent's earlier edits go in the next ask.
+	await $.tool.call({ tool: 'Write', file_path: '/repo/b.js', content: 'x', agentId: 'a1' } as any)
+	await clock.settle()
+	expect(numstats(ran).at(-1)?.slice(-2)).toEqual(['/repo/a.js', '/repo/b.js'])
+})
+
+test('a Read asks git nothing, and neither does an edit that failed', async ($, on) => {
+	const { clock, ran } = await start($, on, { stdout: REFRESH, failing: 'missing' })
+	await $.tool.call(read('/repo/a.js', 'a1'))
+	await $.tool.call(edit('/repo/missing.js', 'a1'))
+	await clock.settle()
+	expect(gitCalls(ran)).toEqual([])
+})
+
+test('an edit outside a repository runs no numbers, branch or status', async ($, on) => {
+	const { clock, ran } = await start($, on, { exits: { [`${GIT} /outside rev-parse`]: 128 } })
+	await $.tool.call(edit('/outside/a.js', 'a1'))
+	await clock.settle()
+	expect(subcommands(ran)).toEqual(['rev-parse'])
+})
+
+test('rapid edits in one repository never run two refreshes at once, and the queued one unions their files', async ($, on) => {
+	let release = () => {}
+	const until = new Promise<void>(resolve => (release = resolve))
+	const { clock, ran } = await start($, on, { stdout: REFRESH, slow: { prefix: `${GIT} /repo diff`, until } })
+	await $.tool.call(edit('/repo/a.js', 'a1'))
+	await idle()
+	expect(numstats(ran)).toHaveLength(1)
+	await $.tool.call(edit('/repo/b.js', 'a1'))
+	await $.tool.call(edit('/repo/c.js', 'a2'))
+	await $.tool.call(edit('/repo/d.js', 'a1'))
+	await idle()
+	// The first is still held open: the rest wait their turn.
+	expect(numstats(ran)).toHaveLength(1)
+	expect(subcommands(ran).filter(name => name === 'status')).toHaveLength(0)
+	release()
+	await idle()
+	await clock.settle()
+	// One more run, for every file asked about meanwhile; nothing per edit.
+	expect(numstats(ran)).toHaveLength(2)
+	expect(numstats(ran)[1].slice(numstats(ran)[1].indexOf('--') + 1).sort()).toEqual([
+		'/repo/a.js', '/repo/b.js', '/repo/c.js', '/repo/d.js'
+	])
+})
+
+test('a refresh that fails leaves things as they were, and a later edit asks again', async ($, on) => {
+	const { clock, ran } = await start($, on, { stdout: REFRESH, exits: { [`${GIT} /repo diff`]: 128 } })
+	await $.tool.call(edit('/repo/a.js', 'a1'))
+	await clock.settle()
+	// No branch or status after a failed numstat.
+	expect(subcommands(ran)).toEqual(['rev-parse', 'diff'])
+	await $.tool.call(edit('/repo/b.js', 'a1'))
+	await clock.settle()
+	expect(numstats(ran)).toHaveLength(2)
+	const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	expect((await pane.find({ key: 'files-a1' }))?.text).toBe('▸ 2')
+	await pane.unmount()
+})
+
+test('a git command that cannot start skips that refresh and never stops the next', async ($, on) => {
+	const { clock, ran } = await start($, on, { stdout: REFRESH, throwing: `${GIT} /repo symbolic-ref` })
+	const result = await $.tool.call(edit('/repo/a.js', 'a1'))
+	await clock.settle()
+	expect(result).toEqual({ result: {} })
+	await $.tool.call(edit('/repo/b.js', 'a1'))
+	await clock.settle()
+	expect(numstats(ran)).toHaveLength(2)
+	expect(subcommands(ran)).not.toContain('status')
+})
+
+test('the Bash scan’s edits are refreshed', async ($, on) => {
+	const { clock, ran } = await start($, on, {
+		stdout: { ...REFRESH, mktemp: `${MARK}\n`, 'find /repo': found('/repo/a.js') }
+	})
+	await $.tool.call(bash("sed -i '' s/a/b/ a.js", 'a1'))
+	await clock.settle()
+	expect(numstats(ran)).toEqual([['diff', '--numstat', '-z', 'HEAD', '--', '/repo/a.js']])
+})
+
+test('a Bash scan that found nothing asks git for no numbers', async ($, on) => {
+	const { clock, ran } = await start($, on, { stdout: { ...REFRESH, mktemp: `${MARK}\n` } })
+	await $.tool.call(bash('make', 'a1'))
+	await clock.settle()
+	expect(numstats(ran)).toEqual([])
+})
+
+test('a commit refreshes the files it marked, after its own check', async ($, on) => {
+	const { clock, ran } = await start($, on, {
+		stdout: {
+			...REFRESH,
+			[`${GIT} /repo status`]: '',
+			[`${GIT} /repo ls-files`]: 'a.js\0',
+			[`${GIT} /repo rev-parse --short HEAD`]: 'abc1234\n'
+		}
+	})
+	await $.tool.call(edit('/repo/a.js', 'a1'))
+	await clock.settle()
+	expect(numstats(ran)).toHaveLength(1)
+	await $.tool.call({ tool: 'Bash', command: 'git commit -am x', agentId: 'a1' } as any)
+	await clock.settle()
+	const names = gitCalls(ran).map(args => args.join(' '))
+	const checked = names.indexOf('rev-parse --short HEAD')
+	expect(checked).toBeGreaterThan(-1)
+	// The refresh that follows the commit asks about the committed file only.
+	expect(numstats(ran)).toHaveLength(2)
+	expect(names.lastIndexOf('diff --numstat -z HEAD -- /repo/a.js')).toBeGreaterThan(checked)
 })

@@ -3,7 +3,7 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { AgentStatusView, MascotPrefs } from '../types'
 import { registerBand } from './band'
-import { SCAN_PRUNE, cdTarget, changedFiles, dirname, dirtyPaths, isGitCommit, joinUp, posix, touchOf } from './files'
+import { SCAN_PRUNE, cdTarget, changedFiles, dirname, dirtyPaths, isGitCommit, joinUp, numstat, posix, touchOf } from './files'
 import { registerFilesPane } from './files-pane'
 import { SET_MASCOT_SPEC, SET_MASCOT_TOOL, applyMascotChange, parseMascotInput, sanitizeMascots } from './mascot'
 import { isMoving, openPane, registerPanel, syncPaneShown } from './panel'
@@ -96,7 +96,9 @@ async function recordFiles($: EngineInterface, tool: string, input: Record<strin
 	const touch = touchOf(tool)
 	const path =
 		typeof input.file_path === 'string' ? input.file_path : typeof input.notebook_path === 'string' ? input.notebook_path : ''
-	if (touch && path) await apply($, { kind: 'touch', at: await $.clock.now(), agentId, path: posix(path), touch })
+	if (!touch || !path) return
+	await apply($, { kind: 'touch', at: await $.clock.now(), agentId, path: posix(path), touch })
+	if (touch === 'edit') refreshGit($, await workedOn($, agentId))
 }
 
 const MARK_MS = 3_000
@@ -163,12 +165,85 @@ async function recordBashEdits($: EngineInterface, command: string, agentId: str
 	// find exits non-zero over one unreadable folder yet still lists the rest, so its output counts either way.
 	const candidates = changedFiles(scan.stdout, Infinity)
 	if (candidates.length === 0) return
+	let isEdited = false
 	for (const path of changedFiles(scan.stdout, undefined, await ignoredAmong($, top, candidates))) {
 		await apply($, { kind: 'touch', at: await $.clock.now(), agentId, path, touch: 'edit' })
+		isEdited = true
 	}
+	if (isEdited) refreshGit($, await workedOn($, agentId))
 }
 
 const GIT_MS = 5_000
+
+// The arguments come as a list: the engine scan rejects `$` passed in a call that also spreads.
+const gitIn = ($: EngineInterface, dir: string, args: string[]) =>
+	$.process.run(['git', '--no-optional-locks', '-C', dir, ...args], { timeoutMs: GIT_MS })
+
+// What an agent has edited or committed, which is what git has numbers for; a read changes no line.
+async function workedOn($: EngineInterface, agentId: string | undefined): Promise<string[]> {
+	const list = (await read($, model)).files?.[agentId ?? MAIN] ?? []
+	return list.filter(item => item.state !== 'read').map(item => item.path)
+}
+
+// One top's lines added and removed against HEAD, its branch and its dirty-file count, as one event. A top git cannot
+// answer for keeps what it had: a failed call dispatches nothing. An edit made while git was being asked is caught by
+// the refresh that edit queues, so the answer may be one edit old but never out of order.
+async function refreshTop($: EngineInterface, top: string, paths: string[]) {
+	try {
+		// Untracked files are not in `diff HEAD`, so they count as [0, 0] until git knows them.
+		const diff = await gitIn($, top, ['diff', '--numstat', '-z', 'HEAD', '--', ...paths])
+		if (diff.exitCode !== 0) return
+		// A non-zero exit is a detached HEAD, not a failure.
+		const head = await gitIn($, top, ['symbolic-ref', '--short', '-q', 'HEAD'])
+		const status = await gitIn($, top, ['status', '--porcelain', '-z'])
+		if (status.exitCode !== 0) return
+		const prefix = top.endsWith('/') ? top : `${top}/`
+		const found = numstat(diff.stdout)
+		const lines = Object.fromEntries(paths.map(path => [path, found[path.slice(prefix.length)] ?? [0, 0]] as const))
+		const branch = head.exitCode === 0 ? head.stdout.trim() || null : null
+		await apply($, { kind: 'git', lines, repos: { [top]: { branch, changed: dirtyPaths(status.stdout).size } } })
+	} catch {
+		// One top that cannot be asked leaves the rest to be refreshed.
+	}
+}
+
+// Per repository top: the refresh in flight, and the paths asked for since it began. Module-level, so a reload starts clean.
+type Flight = { queued?: Set<string> }
+const flights = new Map<string, Flight>()
+
+// At most one refresh runs per top; asking again meanwhile queues one more, which unions every path asked for
+// and starts when the running one ends. An edit burst therefore costs two runs, not one per edit.
+function askTop($: EngineInterface, top: string, paths: Iterable<string>) {
+	const flight = flights.get(top)
+	if (flight) {
+		flight.queued = new Set([...(flight.queued ?? []), ...paths])
+		return
+	}
+	const mine: Flight = {}
+	flights.set(top, mine)
+	// refreshTop never rejects, so the flight always ends and the top is never stuck.
+	void refreshTop($, top, [...paths]).then(() => {
+		flights.delete(top)
+		if (mine.queued) askTop($, top, mine.queued)
+	})
+}
+
+// Fire and forget: refreshes the line counts, branch and dirty count git holds for these paths, in the background.
+// Drawing never runs git; the Files pane reads what these events left in the model.
+function refreshGit($: EngineInterface, paths: string[]) {
+	if (paths.length === 0) return
+	void (async () => {
+		const tops = new Map<string, string[]>()
+		for (const dir of new Set(paths.map(dirname))) {
+			const up = await gitIn($, dir, ['rev-parse', '--show-cdup']).catch(() => null)
+			// Not in a repository, or a directory since deleted: nothing to ask.
+			if (!up || up.exitCode !== 0) continue
+			const top = joinUp(dir, up.stdout.trim())
+			tops.set(top, [...(tops.get(top) ?? []), ...paths.filter(path => dirname(path) === dir)])
+		}
+		for (const [top, list] of tops) askTop($, top, list)
+	})().catch(() => undefined)
+}
 
 // Which of every agent's edited files git now holds clean: those turn committed, with the commit's short SHA. A commit by
 // any agent checks them all, because Main often commits its sub-agents' work. Each file is asked in its own repository,
@@ -183,8 +258,7 @@ async function checkCommit($: EngineInterface) {
 	)
 	const edited = [...new Set(editedBy.flatMap(([, paths]) => paths))]
 	if (edited.length === 0) return
-	const git = (dir: string, ...args: string[]) =>
-		$.process.run(['git', '--no-optional-locks', '-C', dir, ...args], { timeoutMs: GIT_MS })
+	const git = (dir: string, ...args: string[]) => gitIn($, dir, args)
 	const tops = new Map<string, string[]>()
 	for (const dir of new Set(edited.map(dirname))) {
 		const up = await git(dir, 'rev-parse', '--show-cdup').catch(() => null)
@@ -216,6 +290,7 @@ async function checkCommit($: EngineInterface) {
 			// One repository that cannot be asked leaves the rest to be checked.
 		}
 	}
+	const marked: string[] = []
 	// An agent with nothing clean gets no event, so no SHA is stamped on it either.
 	for (const [key, paths] of editedBy) {
 		const mine = paths.filter(path => clean.has(path))
@@ -228,7 +303,10 @@ async function checkCommit($: EngineInterface) {
 			paths: mine,
 			...(sha ? { sha } : {})
 		})
+		marked.push(...mine)
 	}
+	// Committed files read [0, 0] now. The refresh comes after the events, and a run already in flight is followed by it.
+	refreshGit($, marked)
 }
 
 export const register: Register = on => {

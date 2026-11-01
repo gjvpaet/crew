@@ -79,6 +79,10 @@ export type CrewState = {
 	files: Record<string, FileEntry[]>
 	// The short SHA of each agent's latest commit, same keys.
 	lastCommit: Record<string, string>
+	// Lines added and removed against HEAD, by absolute path; a file git holds unchanged has no entry.
+	lines: Record<string, [number, number]>
+	// Each repository top git was last asked about: its branch (null when HEAD is detached) and how many files are dirty.
+	repos: Record<string, { branch: string | null; changed: number }>
 }
 
 declare module 'claude-code' {

@@ -19,7 +19,9 @@ export const EMPTY_STATE: CrewState = {
 	known: {},
 	nextColor: 0,
 	files: {},
-	lastCommit: {}
+	lastCommit: {},
+	lines: {},
+	repos: {}
 }
 
 export type ApiUsage = {
@@ -42,6 +44,8 @@ export type CrewEvent =
 	| { kind: 'statuses'; at: number; list: readonly ListedAgent[] }
 	| { kind: 'touch'; at: number; agentId?: string; path: string; touch: Touch }
 	| { kind: 'committed'; agentId?: string; at?: number; paths: string[]; sha?: string }
+	// What `git` just said about some files and repositories; a path at [0, 0] is clean and leaves `lines`.
+	| { kind: 'git'; lines: Record<string, [number, number]>; repos: Record<string, { branch: string | null; changed: number }> }
 
 const ENDED = new Set<AgentStatusView>(['completed', 'failed', 'killed', 'stopped'])
 const FAILED = new Set<AgentStatusView>(['failed', 'killed', 'stopped'])
@@ -150,6 +154,9 @@ function startTurn(state: CrewState, ev: Extract<CrewEvent, { kind: 'turnStart' 
 		lastRequestInput: previousMain?.lastRequestInput ?? 0
 	})
 	const isListDone = state.tasks.every(task => task.status === 'completed')
+	const files = Object.fromEntries(Object.entries(state.files).filter(([id]) => id in carried))
+	// Counts go with the files that showed them.
+	const kept = new Set(Object.values(files).flatMap(list => list.map(item => item.path)))
 	return {
 		...state,
 		turn: { id: ev.turnId, label: labelOf(ev), startedAt: ev.at, isAborted: false },
@@ -160,8 +167,9 @@ function startTurn(state: CrewState, ev: Extract<CrewEvent, { kind: 'turnStart' 
 		areTasksCarried: !isListDone,
 		agentTasks: Object.fromEntries(Object.entries(state.agentTasks).filter(([id]) => id in carried)),
 		// Files go with their cards: kept for agents still at work, dropped with the rest and with Main's last prompt.
-		files: Object.fromEntries(Object.entries(state.files).filter(([id]) => id in carried)),
+		files,
 		lastCommit: Object.fromEntries(Object.entries(state.lastCommit).filter(([id]) => id in carried)),
+		lines: Object.fromEntries(Object.entries(state.lines).filter(([path]) => kept.has(path))),
 		turnByModel: {}
 	}
 }
@@ -298,6 +306,26 @@ function markCommitted(state: CrewState, ev: Extract<CrewEvent, { kind: 'committ
 	}
 }
 
+function applyGit(state: CrewState, ev: Extract<CrewEvent, { kind: 'git' }>): CrewState {
+	let lines = state.lines
+	for (const [path, counts] of Object.entries(ev.lines)) {
+		const before = lines[path]
+		const isClean = counts[0] === 0 && counts[1] === 0
+		if (isClean ? !before : before && before[0] === counts[0] && before[1] === counts[1]) continue
+		if (lines === state.lines) lines = { ...lines }
+		if (isClean) delete lines[path]
+		else lines[path] = counts
+	}
+	let repos = state.repos
+	for (const [top, info] of Object.entries(ev.repos)) {
+		const before = repos[top]
+		if (before && before.branch === info.branch && before.changed === info.changed) continue
+		if (repos === state.repos) repos = { ...repos }
+		repos[top] = info
+	}
+	return lines === state.lines && repos === state.repos ? state : { ...state, lines, repos }
+}
+
 export function reduce(state: CrewState, ev: CrewEvent): CrewState {
 	// State saved by an older build may lack keys added since; a current one passes through as itself.
 	const isCurrent = Object.keys(EMPTY_STATE).every(key => key in state)
@@ -321,6 +349,8 @@ export function reduce(state: CrewState, ev: CrewEvent): CrewState {
 			return addTouch(s, ev)
 		case 'committed':
 			return markCommitted(s, ev)
+		case 'git':
+			return applyGit(s, ev)
 	}
 }
 
