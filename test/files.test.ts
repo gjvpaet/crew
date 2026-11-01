@@ -363,6 +363,10 @@ test('a chip is the upper-cased extension, cut to 4, toned by kind', () => {
 	expect(chipOf('/r/README.md')).toEqual({ label: 'MD', tone: 'docs' })
 	expect(chipOf('/r/package.json')).toEqual({ label: 'JSON', tone: 'data' })
 	expect(chipOf('/r/.env')).toEqual({ label: 'ENV', tone: 'data' })
+	// A dotfile has an extension only when it is one we know; one with a real last extension keeps it.
+	expect(chipOf('/r/.gitignore')).toEqual({ label: 'FILE', tone: 'other' })
+	expect(chipOf('/r/.eslintrc')).toEqual({ label: 'FILE', tone: 'other' })
+	expect(chipOf('/r/.env.local')).toEqual({ label: 'LOCA', tone: 'other' })
 	expect(chipOf('/r/logo.png')).toEqual({ label: 'PNG', tone: 'other' })
 	expect(chipOf('/r/Makefile')).toEqual({ label: 'FILE', tone: 'other' })
 	expect(chipOf('/r/trailing.')).toEqual({ label: 'FILE', tone: 'other' })
@@ -407,6 +411,11 @@ test('the touched rows run newest first and carry name, folder, chip and counts'
 test('equal touch times keep the later entry first', () => {
 	const rows = touchedRows([entry('/r/a', 'read', 5), entry('/r/b', 'read', 5)], '/r', 'completed', {})
 	expect(rows.map(row => row.name)).toEqual(['b', 'a'])
+	const running = touchedRows([entry('/r/a', 'read', 5), entry('/r/b', 'read', 5)], '/r', 'running', {})
+	expect(running.map(row => [row.name, row.isLive])).toEqual([
+		['b', true],
+		['a', false]
+	])
 })
 
 test('only the latest touch is live, and only while the agent runs, with its own pill words', () => {
@@ -478,6 +487,14 @@ test('an agent that waits shows WAITING in amber with a pause, whatever it touch
 			title: 'Editing a.js'
 		})
 	expect(rightNow([], 'idle', '/repo', {}, {})).toMatchObject({ label: 'WAITING', icon: 'pause', title: 'No files yet', subtitle: '' })
+	// A running agent that has touched nothing yet has nothing to shine on either.
+	expect(rightNow([], 'running', '/repo', {}, {})).toMatchObject({
+		label: 'RIGHT NOW',
+		tone: 'waiting',
+		icon: 'pause',
+		title: 'No files yet',
+		subtitle: ''
+	})
 })
 
 test('an ended agent shows DONE, titled by its dominant state and summed by state', () => {

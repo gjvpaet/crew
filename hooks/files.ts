@@ -121,6 +121,8 @@ export function dirtyPaths(porcelainZ: string): Set<string> {
 const isInside = (root: string, path: string) => root !== '' && path.startsWith(root.endsWith('/') ? root : `${root}/`)
 const relativeTo = (root: string, path: string) => path.slice(root.replace(/\/$/, '').length + 1)
 const basename = (path: string) => path.slice(path.lastIndexOf('/') + 1)
+// Relative to the project folder, or the path itself outside it.
+const shownPath = (root: string, path: string) => (isInside(root, path) ? relativeTo(root, path) : path)
 export const dirname = (path: string) => {
 	const at = path.lastIndexOf('/')
 	return at < 0 ? '' : at === 0 ? '/' : path.slice(0, at)
@@ -140,7 +142,7 @@ export function headline(entries: readonly FileEntry[], status: AgentStatusView,
 		const label = status === 'running' ? 'RIGHT NOW' : 'WAITING'
 		const live = latestOf(entries)
 		if (!live) return { label, line: 'No files yet.', where: '' }
-		const shown = isInside(root, live.path) ? relativeTo(root, live.path) : live.path
+		const shown = shownPath(root, live.path)
 		return { label, line: `${VERBS[live.state]} ${basename(shown)}`, where: dirname(shown) }
 	}
 	const counts = (['edited', 'committed', 'read'] as const)
@@ -152,11 +154,10 @@ export function headline(entries: readonly FileEntry[], status: AgentStatusView,
 
 export type ChipTone = 'code' | 'docs' | 'data' | 'other'
 
-const TONES: Record<ChipTone, string> = {
+const TONES: Record<Exclude<ChipTone, 'other'>, string> = {
 	code: 'js jsx ts tsx mjs cjs py rb go rs java kt swift c h cpp cs php sh vue svelte css scss html',
 	docs: 'md mdx txt rst pdf doc docx',
-	data: 'json yaml yml toml csv xml sql lock env',
-	other: ''
+	data: 'json yaml yml toml csv xml sql lock env'
 }
 
 const TONE_OF = new Map<string, ChipTone>(
@@ -166,8 +167,10 @@ const TONE_OF = new Map<string, ChipTone>(
 // The type chip of a row: the extension of the file name (a dot in a folder does not count), upper-cased and cut to 4.
 export function chipOf(path: string): { label: string; tone: ChipTone } {
 	const name = basename(path)
-	const ext = name.slice(name.lastIndexOf('.') + 1).toLowerCase()
-	if (!name.includes('.') || ext === '') return { label: 'FILE', tone: 'other' }
+	const dot = name.lastIndexOf('.')
+	const ext = name.slice(dot + 1).toLowerCase()
+	// A dotfile (.gitignore) is a name, not an extension, unless it is one we know (.env).
+	if (dot < 0 || ext === '' || (dot === 0 && !TONE_OF.has(ext))) return { label: 'FILE', tone: 'other' }
 	return { label: ext.toUpperCase().slice(0, 4), tone: TONE_OF.get(ext) ?? 'other' }
 }
 
@@ -187,7 +190,6 @@ export type TouchedRow = {
 	chip: { label: string; tone: ChipTone }
 }
 
-const PAST: Record<FileState, string> = { read: 'read', edited: 'edited', committed: 'committed' }
 const PRESENT: Record<FileState, string> = { read: 'reading', edited: 'editing', committed: 'committed' }
 
 // The agent's files as flat rows, newest touch first. Only the latest touch is live, and only while the agent runs.
@@ -204,7 +206,7 @@ export function touchedRows(
 		.sort((a, b) => b.item.at - a.item.at || b.index - a.index)
 		.map(({ item }) => {
 			const isLive = item === live
-			const shown = isInside(root, item.path) ? relativeTo(root, item.path) : item.path
+			const shown = shownPath(root, item.path)
 			const [added, removed] = lines[item.path] ?? [0, 0]
 			return {
 				key: `file:${item.path}`,
@@ -212,7 +214,7 @@ export function touchedRows(
 				name: basename(item.path),
 				folder: dirname(shown) || '.',
 				state: item.state,
-				pill: (isLive ? PRESENT : PAST)[item.state],
+				pill: isLive ? PRESENT[item.state] : item.state,
 				isLive,
 				added,
 				removed,
@@ -287,9 +289,9 @@ export function rightNow(
 	const isRunning = status === 'running'
 	const label = isRunning ? 'RIGHT NOW' : 'WAITING'
 	if (!latest) {
-		return { ...base, label, tone: isRunning ? 'read' : 'waiting', icon: isRunning ? 'eye' : 'pause', title: 'No files yet', subtitle: '' }
+		return { ...base, label, tone: 'waiting', icon: 'pause', title: 'No files yet', subtitle: '' }
 	}
-	const shown = isInside(root, latest.path) ? relativeTo(root, latest.path) : latest.path
+	const shown = shownPath(root, latest.path)
 	return {
 		...base,
 		label,
@@ -307,7 +309,7 @@ export function shineColors(text: string, now: number, base: string, bright: str
 	return letters.map((_, at) => ((at - start + letters.length) % letters.length < 3 ? bright : base))
 }
 
-const count = (text: string) => (/^\d+$/.test(text) ? Number(text) : 0)
+const toCount = (text: string) => (/^\d+$/.test(text) ? Number(text) : 0)
 
 // `git diff --numstat -z` output as path (relative to the repository top, as git prints it) to [added, removed]; a
 // binary file's `-` counts as 0. A rename is printed as an empty path then the old and the new one; the new one is kept.
@@ -324,7 +326,7 @@ export function numstat(stdout: string): Record<string, [number, number]> {
 			path = tokens[at + 2] ?? ''
 			at += 2
 		}
-		if (path !== '') found[path] = [count(token.slice(0, first)), count(token.slice(first + 1, second))]
+		if (path !== '') found[path] = [toCount(token.slice(0, first)), toCount(token.slice(first + 1, second))]
 	}
 	return found
 }
