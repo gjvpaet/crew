@@ -3,7 +3,6 @@ import type { EngineInterface, On } from 'claude-code'
 
 import type { CrewState, FileState } from '../types'
 import {
-	countsText,
 	latestOf,
 	openCommand,
 	posix,
@@ -15,7 +14,7 @@ import {
 	type RightNow,
 	type TouchedRow
 } from './files'
-import { iconSvg, shineSvg } from './svg'
+import { badgeSvg, iconSvg, ruleSvg, shineSvg } from './svg'
 import { EMPTY_STATE } from './tracker'
 
 const FILES_PANE = 'crew-files'
@@ -31,34 +30,60 @@ export const STATE_COLORS: Record<FileState, string> = { read: '#A371F7', edited
 // under the 2,000 Desktop will draw.
 export const MAX_ROWS = 100
 
+const STATE_ORDER: FileState[] = ['read', 'edited', 'committed']
+
 const WAITING_COLOR = '#D29922'
 const ADDED_COLOR = '#7FC77F'
 const REMOVED_COLOR = '#F07A7A'
 const QUIET_COLOR = '#8B949E'
-// The card's outline right after a touch, so a new file is noticed from the corner of an eye.
+// The card's outline while its agent runs, and right after a touch once it has stopped, so a new file is noticed from
+// the corner of an eye.
 const FLASH_COLOR = '#E8E6DF'
 export const FLASH_MS = 1200
-const CHIP_COLORS: Record<ChipTone, string> = { code: '#E3B341', docs: '#58A6FF', data: '#56D364', other: QUIET_COLOR }
+const TERMINAL_CHIP_COLORS: Record<ChipTone, string> = { code: '#E3B341', docs: '#58A6FF', data: '#56D364', other: QUIET_COLOR }
 
-const ICON_PX = 36
+// Where SVG is drawn the pane takes the approved mockup's palette whole: dark cards that read the same on a light or a
+// dark theme, the text on them in its own colours rather than the theme's.
+const LOOK = {
+	card: '#232321',
+	edge: '#3A3936',
+	ink: FLASH_COLOR,
+	dim: '#8D8B84',
+	muted: '#B4B2A9',
+	changed: '#E6C463',
+	branch: '#85B7EB'
+}
+const CHIPS: Record<ChipTone, { fill: string; color: string }> = {
+	code: { fill: '#3A3420', color: '#E6C463' },
+	docs: { fill: '#1F2F45', color: '#85B7EB' },
+	data: { fill: '#1F3A2A', color: '#7FDC8F' },
+	other: { fill: '#2F2F2C', color: '#B4B2A9' }
+}
+// A settled pill is its colour, lightened, on a dark wash of it; the live one is dark on the solid colour.
+const PILLS: Record<FileState, { fill: string; color: string; live: string }> = {
+	read: { fill: '#3A2A55', color: '#CBB2FF', live: '#1E1033' },
+	edited: { fill: '#47301F', color: '#FFB98A', live: '#2A1608' },
+	committed: { fill: '#1F3D26', color: '#7FDC8F', live: '#0B2512' }
+}
+// The live row's fill: its state colour, faint, over the card.
+const LIVE_FILLS: Record<FileState, string> = { read: '#2B2238', edited: '#3A2617', committed: '#1C3021' }
+const NAME_PX = 14
+
+const ICON_PX = 40
 const BRANCH_PX = 14
 const TERMINAL_ICONS: Record<RightNow['icon'], string> = { eye: '◉', pencil: '✎', check: '✓', pause: '‖' }
 
 type Surface = 'graphical' | 'terminal'
 
 const channels = (hex: string) => [1, 3, 5].map(at => parseInt(hex.slice(at, at + 2), 16))
-const alpha = (hex: string, opacity: number) => `rgba(${channels(hex).join(',')},${opacity})`
 const toHex = (values: number[]) => '#' + values.map(value => Math.round(value).toString(16).padStart(2, '0')).join('').toUpperCase()
 // The terminal shine's band: the state colour most of the way to white, so it still reads as that colour.
 const brighter = (hex: string) => toHex(channels(hex).map(value => value + (255 - value) * 0.6))
 
-// A chip or a pill: the colour on a faint wash of itself where the surface blends colours, and dark on the solid
-// colour in the terminal, which reads on a light or a dark theme alike.
-const badge = (hex: string, surface: Surface) =>
-	surface === 'graphical' ? { color: hex, backgroundColor: alpha(hex, 0.18) } : { color: '#000000', backgroundColor: hex }
-
-// Non-breaking, so the badge's padding survives a surface that trims spaces; chips pad to 4 so the names line up.
+// The terminal's chips and pills: dark on the solid colour, which reads on a light or a dark theme alike. Non-breaking
+// spaces pad them, so the padding survives a surface that trims spaces; chips pad to 4 so the names line up.
 const NB = '\u00a0'
+const terminalBadge = (hex: string) => ({ color: '#000000', backgroundColor: hex })
 const chipText = (label: string) => `${NB}${label.padEnd(4, NB)}${NB}`
 const pillText = (pill: string) => `${NB}${pill}${NB}`
 
@@ -117,18 +142,19 @@ async function wouldRunOrIsLink($: EngineInterface, path: string) {
 
 // A file row shows its file in the default app, or its folder for a file that app would run; a failure is only a
 // toast.
-async function openFile($: EngineInterface, path: string) {
+// `isReveal` asks for the folder outright, as the live row's folder does.
+async function openFile($: EngineInterface, path: string, isReveal = false) {
 	const name = path.slice(path.lastIndexOf('/') + 1)
 	const os = await osName($)
 	// Windows runs by extension alone, which openCommand judges; the first call only tells a path it refuses.
-	const plain = openCommand(os, path, false)
-	const command = plain && os !== 'win32' && (await wouldRunOrIsLink($, path)) ? openCommand(os, path, true) : plain
+	const plain = openCommand(os, path, isReveal)
+	const command = plain && !isReveal && os !== 'win32' && (await wouldRunOrIsLink($, path)) ? openCommand(os, path, true) : plain
 	if (command) {
 		try {
 			const ran = await $.process.run(command.argv, { timeoutMs: 5_000 })
 			// explorer exits 1 even when it showed the file.
 			if (command.argv[0] === 'explorer' || ran.exitCode === 0) {
-				if (command.isReveal) $.ui.toast(`Crew: showed ${name} in its folder rather than running it`)
+				if (command.isReveal && !isReveal) $.ui.toast(`Crew: showed ${name} in its folder rather than running it`)
 				return
 			}
 		} catch {
@@ -171,13 +197,14 @@ export function registerFilesPane(on: On) {
 		const status = state.agents[key].status
 		const root = posix(await $.session.cwd())
 		const now = await $.clock.now()
+		const tops = Object.keys(repos)
 		const card = rightNow(entries, status, root, lines, repos)
-		const rows = touchedRows(entries, root, status, lines)
+		const rows = touchedRows(entries, root, status, lines, tops)
 		const repo = card.repoTop === null ? undefined : repos[card.repoTop]
 		const labelColor = card.tone === 'waiting' ? WAITING_COLOR : STATE_COLORS[card.tone]
-		const legend: FileState[] = entries.some(item => item.state === 'committed')
-			? ['read', 'edited', 'committed']
-			: ['read', 'edited']
+		const isLit = status === 'running' || isFlashing(state, key, now)
+		// A colour of the mockup where SVG is drawn; in the terminal, the theme's dim or its own text.
+		const tint = (color: string, isDim = true) => (Svg ? { color } : isDim ? { dimColor: true } : {})
 
 		const icon = Svg ? (
 			<Svg source={iconSvg(card.icon, labelColor, ICON_PX)} alt={`${card.icon} icon`} width={ICON_PX} height={ICON_PX} />
@@ -185,52 +212,49 @@ export function registerFilesPane(on: On) {
 			<Text color={labelColor}>{TERMINAL_ICONS[card.icon]}</Text>
 		)
 
-		const counts = (added: number, removed: number) => [
+		const counts = (added: number, removed: number, size?: 'footnote') => [
 			added > 0 && (
-				<Text key="added" color={ADDED_COLOR}>
+				<Text key="added" color={ADDED_COLOR} size={size}>
 					{`+${added}`}
 				</Text>
 			),
 			removed > 0 && (
-				<Text key="removed" color={REMOVED_COLOR}>
+				<Text key="removed" color={REMOVED_COLOR} size={size}>
 					{`\u2212${removed}`}
 				</Text>
 			)
 		]
 
 		const branchRow = (known: { branch: string | null; changed: number }) => (
-			<Box key="branch" flexDirection="row" gap={1} marginTop={1} alignItems="center">
+			<Box key="branch" flexDirection="row" gap={1} alignItems="center" {...(Svg ? {} : { marginTop: 1 })}>
 				{Svg ? (
-					<Svg source={iconSvg('branch', QUIET_COLOR, BRANCH_PX)} alt="branch" width={BRANCH_PX} height={BRANCH_PX} />
+					<Svg source={iconSvg('branch', LOOK.branch, BRANCH_PX)} alt="branch" width={BRANCH_PX} height={BRANCH_PX} />
 				) : (
 					<Text color={QUIET_COLOR}>⎇</Text>
 				)}
 				<Box flexGrow={1} width={0}>
-					<Text wrap="truncate-end">{known.branch || 'detached'}</Text>
+					<Text weight="medium" wrap="truncate-end" {...tint(LOOK.ink, false)}>
+						{known.branch || 'detached'}
+					</Text>
 				</Box>
-				<Text dimColor>
-					{[countsText(card.totals.added, card.totals.removed), known.changed === 0 ? 'clean' : `${known.changed} changed`]
-						.filter(Boolean)
-						.join(' · ')}
-				</Text>
+				{counts(card.totals.added, card.totals.removed)}
+				{(card.totals.added > 0 || card.totals.removed > 0) && <Text {...tint(LOOK.dim)}>·</Text>}
+				{known.changed === 0 ? (
+					<Text {...tint(LOOK.dim)}>clean</Text>
+				) : (
+					<Text color={LOOK.changed}>{`${known.changed} changed`}</Text>
+				)}
 			</Box>
 		)
 
-		// `isMark`: the live row's dim ↗, which stands in for its name as what a press opens.
-		const openButton = (row: TouchedRow, children: JSX.Element | JSX.Element[], isMark = false) => (
-			<Button
-				key={`open-${row.path}`}
-				plain
-				{...(isMark ? { dimColor: true } : {})}
-				label={row.name}
-				onPress={() => openFile($, row.path)}
-			>
+		const openButton = (row: TouchedRow, children: JSX.Element | JSX.Element[]) => (
+			<Button key={`open-${row.path}`} plain label={row.name} onPress={() => openFile($, row.path)}>
 				{children}
 			</Button>
 		)
 
-		const folder = (row: TouchedRow) => (
-			<Text dimColor wrap="truncate-end">
+		const folderText = (row: TouchedRow) => (
+			<Text size="footnote" wrap="truncate-end" {...tint(LOOK.dim)}>
 				{row.folder}
 			</Text>
 		)
@@ -239,12 +263,24 @@ export function registerFilesPane(on: On) {
 		// per letter in the terminal, the band moving a letter at each redraw.
 		const nameParts = (row: TouchedRow) => {
 			const base = STATE_COLORS[row.state]
-			if (!row.isLive) return [openButton(row, <Text weight="semibold">{row.name}</Text>), folder(row)]
+			if (!row.isLive)
+				return [
+					openButton(
+						row,
+						<Text weight="medium" {...tint(LOOK.ink, false)}>
+							{row.name}
+						</Text>
+					),
+					folderText(row)
+				]
 			if (Svg) {
-				const shine = shineSvg(row.name, base)
+				const shine = shineSvg(row.name, base, { fontSize: NAME_PX, weight: 500 })
+				// An SVG cannot sit in a Button, so the live row is pressed by its folder, which shows the file in it.
 				return [
 					<Svg source={shine.source} alt={row.name} width={shine.width} height={shine.height} isInteractive />,
-					folder(row)
+					<Button key={`open-${row.path}`} plain label={row.name} onPress={() => openFile($, row.path, true)}>
+						{folderText(row)}
+					</Button>
 				]
 			}
 			const colors = shineColors(row.name, now, base, brighter(base))
@@ -253,38 +289,56 @@ export function registerFilesPane(on: On) {
 					{letter}
 				</Text>
 			))
-			return [openButton(row, letters), folder(row)]
+			return [openButton(row, letters), folderText(row)]
 		}
 
-		// The live row is outlined in its state colour (and tinted where the surface blends); the others are padded by
-		// as much, so every chip starts in the same column.
+		const chip = (row: TouchedRow) => {
+			if (!Svg)
+				return (
+					<Text mono {...terminalBadge(TERMINAL_CHIP_COLORS[row.chip.tone])}>
+						{chipText(row.chip.label)}
+					</Text>
+				)
+			const tone = CHIPS[row.chip.tone]
+			const drawn = badgeSvg('chip', row.chip.label, tone.fill, tone.color)
+			return <Svg source={drawn.source} alt={row.chip.label} width={drawn.width} height={drawn.height} />
+		}
+
+		const pill = (row: TouchedRow) => {
+			if (!Svg) return <Text {...terminalBadge(STATE_COLORS[row.state])}>{pillText(row.pill)}</Text>
+			const tone = PILLS[row.state]
+			const drawn = row.isLive
+				? badgeSvg('pill', row.pill, STATE_COLORS[row.state], tone.live)
+				: badgeSvg('pill', row.pill, tone.fill, tone.color)
+			return <Svg source={drawn.source} alt={row.pill} width={drawn.width} height={drawn.height} />
+		}
+
+		// The live row is outlined (and filled where the surface draws SVG); the others are padded by as much, so every
+		// chip starts in the same column.
 		const touchedRow = (row: TouchedRow) => (
 			<Box
 				key={row.key}
 				flexDirection="row"
 				gap={1}
+				alignItems="center"
+				paddingY="sm"
 				{...(row.isLive
-					? {
-							borderStyle: 'round',
-							borderColor: STATE_COLORS[row.state],
-							...(Svg ? { backgroundColor: alpha(STATE_COLORS[row.state], 0.08) } : {})
-						}
+					? Svg
+						? { borderStyle: 'round', borderColor: LOOK.ink, backgroundColor: LIVE_FILLS[row.state] }
+						: { borderStyle: 'round', borderColor: STATE_COLORS[row.state] }
 					: { paddingX: 1 })}
 			>
-				<Text mono {...badge(CHIP_COLORS[row.chip.tone], surface)}>
-					{chipText(row.chip.label)}
-				</Text>
+				{chip(row)}
 				{/* width 0 + flexGrow 1: the name and folder take what the chip, counts and pill leave. */}
-				<Box key="name" flexDirection="row" gap={1} flexGrow={1} width={0}>
+				<Box key="name" flexDirection="row" gap={1} flexGrow={1} width={0} alignItems="center">
 					{nameParts(row)}
 				</Box>
-				{/* An SVG cannot sit in a Button, so the shining name opens through a mark of its own, outside the name cell
-				    so a long name never squeezes it away. */}
-				{row.isLive && Svg && openButton(row, <Text>{'\u2197'}</Text>, true)}
-				{counts(row.added, row.removed)}
-				<Text {...badge(STATE_COLORS[row.state], surface)}>{pillText(row.pill)}</Text>
+				{counts(row.added, row.removed, 'footnote')}
+				{pill(row)}
 			</Box>
 		)
+
+		const cardFill = Svg ? { backgroundColor: LOOK.card } : {}
 
 		return (
 			<Box flexDirection="column">
@@ -292,59 +346,75 @@ export function registerFilesPane(on: On) {
 					key="now"
 					flexDirection="column"
 					borderStyle="round"
-					{...(isFlashing(state, key, now) ? { borderColor: FLASH_COLOR } : {})}
+					{...(isLit ? { borderColor: FLASH_COLOR } : Svg ? { borderColor: LOOK.edge } : {})}
+					{...cardFill}
 					paddingX={1}
 					marginBottom={1}
 				>
 					<Box key="now-head" flexDirection="row" gap={1} alignItems="center">
 						{icon}
 						<Box flexDirection="column" flexGrow={1} width={0}>
-							<Text color={labelColor} size="caption" weight="semibold">
+							<Text color={labelColor} size="caption" weight="medium">
 								{card.label}
 							</Text>
-							<Text weight="semibold" wrap="truncate-end">
+							<Text size="heading" weight="medium" wrap="truncate-end" {...tint(LOOK.ink, false)}>
 								{card.title}
 							</Text>
-							{card.subtitle ? (
-								<Text dimColor wrap="truncate-end">
-									{card.subtitle}
-								</Text>
-							) : null}
+							{(card.subtitle || card.counts.added > 0 || card.counts.removed > 0) && (
+								<Box key="now-sub" flexDirection="row" gap={1}>
+									{card.subtitle ? (
+										<Text wrap="truncate-end" {...tint(LOOK.dim)}>
+											{card.subtitle}
+										</Text>
+									) : null}
+									{counts(card.counts.added, card.counts.removed)}
+								</Box>
+							)}
 						</Box>
 					</Box>
+					{Svg && (
+						<Box key="rule" marginY="sm">
+							{/* No width: the rule stretches across the card, as the Agents pane's bars do. */}
+							<Svg source={ruleSvg(LOOK.edge)} alt="divider" height={1} />
+						</Box>
+					)}
 					{repo && branchRow(repo)}
-					<Box key="legend" flexDirection="row" gap={2} marginTop={1}>
-						{legend.map(fileState => (
-							<Text key={`legend-${fileState}`} color={STATE_COLORS[fileState]}>
-								{`● ${fileState}`}
+					<Box key="legend" flexDirection="row" gap={2} marginTop={Svg ? 'xs' : 1}>
+						{STATE_ORDER.map(fileState => (
+							<Text key={`legend-${fileState}`} size="footnote" {...tint(LOOK.muted)}>
+								<Text color={STATE_COLORS[fileState]}>●</Text>
+								{` ${fileState}`}
 							</Text>
 						))}
 					</Box>
 				</Box>
 				{rows.length > 0 && (
-					<Box key="touched" flexDirection="column" borderStyle="round" paddingX={1}>
-						<Box key="touched-head" flexDirection="row">
+					<Box
+						key="touched"
+						flexDirection="column"
+						borderStyle="round"
+						{...(Svg ? { borderColor: LOOK.edge } : {})}
+						{...cardFill}
+						paddingX={1}
+					>
+						<Box key="touched-head" flexDirection="row" marginBottom={Svg ? 'xs' : 0}>
 							<Box flexGrow={1}>
-								<Text dimColor size="caption">
+								<Text size="caption" weight="medium" {...tint(LOOK.muted)}>
 									TOUCHED
 								</Text>
 							</Box>
-							<Text dimColor size="caption">
+							<Text size="caption" weight="medium" {...tint(LOOK.muted)}>
 								{`${rows.length} FILE${rows.length === 1 ? '' : 'S'}`}
 							</Text>
 						</Box>
 						{rows.slice(0, MAX_ROWS).map(touchedRow)}
-						{rows.length > MAX_ROWS && (
-							<Text dimColor>
-								{`+ ${rows.length - MAX_ROWS} more`}
-							</Text>
-						)}
+						{rows.length > MAX_ROWS && <Text {...tint(LOOK.dim)}>{`+ ${rows.length - MAX_ROWS} more`}</Text>}
 					</Box>
 				)}
 				{sha && (
 					<Box key="commit" flexDirection="row" gap={1} marginTop={1}>
 						<Text color={STATE_COLORS.committed}>●</Text>
-						<Text dimColor>{`committed ${sha}`}</Text>
+						<Text {...tint(LOOK.dim)}>{`committed ${sha}`}</Text>
 					</Box>
 				)}
 			</Box>

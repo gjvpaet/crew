@@ -33,7 +33,7 @@ Pane id `crew-files`, title `Files · <agent title>`.
 │ ● read   ● edited   ● committed               │
 ╰───────────────────────────────────────────────╯
 ╭ TOUCHED                                3 FILES ╮
-│ ╭ JSX  PriceTable.jsx ↗ src/pricing +12 −3 editing ╮ │ ← live row: outlined, name shines
+│ ╭ JSX  PriceTable.jsx  src/pricing +12 −3 editing ╮ │ ← live row: outlined, name shines
 │   JS   usePrices.js    src/pricing        read     │
 │   JSX  PriceTable.test.jsx  test     +2 committed  │
 ╰───────────────────────────────────────────────╯
@@ -51,7 +51,7 @@ Pane id `crew-files`, title `Files · <agent title>`.
   - pause while waiting, and for a running agent with no files yet;
   - check when done.
 - **Title and subtitle:**
-  - running or waiting: the title is `Reading`, `Editing` or `Committed <name>` of the latest touch, and the subtitle is its folder (relative, absolute outside the project, empty at the root) and its non-zero counts (`+12 −3`, Unicode minus);
+  - running or waiting: the title is `Reading`, `Editing` or `Committed <name>` of the latest touch, and the subtitle is its folder (relative; outside the project, under its repository's name such as `crew/docs`, or `…/` and its last two folders; empty at the root) followed by its non-zero counts (`+12 −3`, Unicode minus) in green and red;
   - done: the title is `Edited 2 files` / `Read 1 file` / `Committed 3 files`, naming the dominant state, and the subtitle is the summary `edited 2, committed 1, read 3`;
   - no entries: the title is `No files yet`.
 - **Branch row:** shown when git info for the latest touch's repository is known. The branch name (or `detached`) with a branch glyph, then the agent's total `+A −D` and `· N changed`, or `clean`. There is no divider line above it: the elements have no top-only border.
@@ -64,11 +64,11 @@ Pane id `crew-files`, title `Files · <agent title>`.
 - **Each row:**
   - a type chip: the upper-cased extension, at most 4 letters, or `FILE`. Dotfiles count only when known (`.env` gives `ENV`). The colour by kind: code is amber, docs blue, data green, other gray.
   - the name, semibold;
-  - the folder, dim (`.` at the root, absolute outside the project);
+  - the folder, dim (`.` at the root; outside the project, shortened as in the subtitle);
   - non-zero `+A` (green) and `−D` (red);
   - a pill: `reading`, `editing` or `committed` on the live row, and `read`, `edited` or `committed` elsewhere, in purple, orange or green. Pills and chips are text spans with a tinted background.
 - **Live row:** the latest touch while the agent runs. It gets a round border in its state colour, tinted on graphical surfaces.
-  - On graphical surfaces its name is an animated SVG (`shineSvg`, `isInteractive`): a light band sweeps across the letters every 1.6 s. Since a Button cannot hold an SVG, a small `↗` Button beside the name opens the file.
+  - On graphical surfaces its name is an animated SVG (`shineSvg`, `isInteractive`): a light band sweeps across the letters every 1.6 s. Since a Button cannot hold an SVG, the live row's folder is its Button, and pressing it shows the file in its folder (no toast).
   - In the terminal the name is the Button. Each letter is coloured by `shineColors`, a 3-letter band of the state colour blended 60% toward white, stepping one letter per 200 ms redraw. Names under 4 letters stay plain.
 - **Other rows:** the name is the Button that opens the file.
 
@@ -80,7 +80,7 @@ Pane id `crew-files`, title `Files · <agent title>`.
 
 ### Clicking a file row
 
-A press must never start a program. Pressing a file (its name, or the live row's `↗`):
+A press must never start a program. Pressing a file (its name, or the live row's folder, which always reveals):
 
 1. **Refuses** a path that is not absolute (`/…`, or a drive letter on Windows): the toast `Crew: couldn't open <name>`.
 2. **Reveals the file in its folder instead of opening it** when opening would run something:
@@ -191,7 +191,7 @@ A `committed` event that changes nothing returns the same state object.
 |---|---|
 | `hooks/files.ts` (new, pure) | `applyTouch`, `applyCommitted` (state rules, caps, the `until` guard); `latestOf`; `touchOf`; `posix`; `dirname`; `chipOf(path)`; `touchedRows(entries, root, status, lines)` → the flat Touched rows, newest first; `rightNow(entries, status, root, lines, repos)` → the card's label, tone, icon, title, subtitle, totals and repository; `countsText`; `shineColors(text, now, base, bright)` for the terminal shine; `numstat(stdout)`; `isGitCommit(command)`; `dirtyPaths(porcelainZ)`; `joinUp(dir, cdup)`; `openCommand(platform, path, isExecutable)`; `cdTarget(command, home)`, `changedFiles(stdout, cap, ignored)`, `SCAN_PRUNE` for the Bash scan |
 | `hooks/tracker.ts` | `touch` and `committed` events delegating to `files.ts`; `EMPTY_STATE` gains `files: {}`, `lastCommit: {}`; a new prompt drops files with their cards |
-| `hooks/files-pane.tsx` (new) | `registerFilesPane(on)`: the `ui.render` hook for `crew-files`, `ui.close` (matched on its id) clearing `filesFor`, `showFiles($, key)` (open, switch or close), the platform check and the safe `openFile`, the Right-now card, the Touched card, the live row (SVG shine and `↗` open on graphical surfaces, per-letter shine in the terminal) and the footer |
+| `hooks/files-pane.tsx` (new) | `registerFilesPane(on)`: the `ui.render` hook for `crew-files`, `ui.close` (matched on its id) clearing `filesFor`, `showFiles($, key)` (open, switch or close), the platform check and the safe `openFile`, the Right-now card, the Touched card, the live row (SVG shine with its folder as the press on graphical surfaces, per-letter shine in the terminal) and the footer |
 | `hooks/view.ts` | `RowView` gains `fileCount` and `isFilesShown`; keeps `PULSE` and `pulseColor` for the Agents pane |
 | `hooks/panel.tsx` | the chevron button on the card's title row and the line row; pressing it calls `showFiles` |
 | `hooks/register.tsx` | `tool.call` dispatches `touch` events, marks and scans foreground Bash calls for the files they changed, and, for a finished commit by any agent, runs `checkCommit` over every agent's edited files and dispatches one `committed` per agent with clean files; `refreshGit` (with its per-top debounce and folder → top cache) for the git info; registers the Files pane. The ticker redraws while an agent runs (the terminal shine) and while a flash is fading |
@@ -236,7 +236,7 @@ Run one test file at a time (`scripts/test-one.sh <file>`).
     - an unplaced pane leaves it unlit.
   - **Pane content:**
     - the how-to message with no agent, or a dropped one;
-    - the live row: an `isInteractive` shine SVG with `↗` on desktop, per-letter colours in the terminal; chips and pills; `+/−` counts and the branch row (`clean`, `detached`) once git answers; RIGHT NOW, WAITING and DONE; the flash fading even with nothing running;
+    - the live row: an `isInteractive` shine SVG with its folder as the press on desktop, per-letter colours in the terminal; chips and pills; `+/−` counts and the branch row (`clean`, `detached`) once git answers; RIGHT NOW, WAITING and DONE; the flash fading even with nothing running;
     - `WAITING` and `DONE` headers;
     - 300 files stay inside the drawing budget (nodes, characters, depth) with `+ N more`.
   - **Clicking a file:**
@@ -254,3 +254,7 @@ Run one test file at a time (`scripts/test-one.sh <file>`).
 ## Out of scope
 
 Grep/Glob hits, reads through Bash, diffs, previews, a whole-project tree, and switching agents from inside the Files pane.
+
+## Matching the mockup on Desktop
+
+Where SVG is drawn the pane uses the approved mockup's palette as a whole: cards `#232321` edged `#3A3936`, text `#E8E6DF`, dim `#8D8B84`, and legend and header words `#B4B2A9`. The Right-now card is edged `#E8E6DF` while its agent runs (and during the flash). A rule (a stretched one-pixel SVG) sits under the card's head. The branch glyph is `#85B7EB`, and `N changed` is `#E6C463`. The legend always names all three states, a coloured dot beside a grey word. Chips and pills are rounded SVGs (`badgeSvg`). A chip is its tone's colour on a dark fill of it. A settled pill is light on a dark wash; the live pill is dark on its solid state colour. The live row is edged `#E8E6DF` and filled with a dark tint of its state. The terminal keeps theme colours and text badges.

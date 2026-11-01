@@ -370,13 +370,24 @@ function shortHash(text: string): string {
 const SHINE = { duration: 1.6, band: 0.4, minBand: 14, tint: '#FFFFFF', peak: 0.75 }
 const SHINE_FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
 
+// A sans name's width in ems, letter by letter, so the drawing ends where its text does: no text metrics are available
+// here, so these are the system face's rough widths, leaning wide so a name is never clipped.
+const NARROW = new Set("ijlI.,:;'|!()[]{} ")
+const WIDE = new Set('mwMW')
+const textEms = (text: string) =>
+	Array.from(text).reduce((sum, ch) => {
+		if (NARROW.has(ch)) return sum + 0.3
+		if (WIDE.has(ch)) return sum + 0.86
+		if (ch === 'f' || ch === 't' || ch === 'r') return sum + 0.4
+		return sum + (ch >= 'A' && ch <= 'Z' ? 0.66 : 0.56)
+	}, 0)
+
 // The live file's name: the name in `color`, and over it a lighter band that sweeps across the letters every 1.6 s.
 // The band is a rect with a transparent-light-transparent gradient, moved by CSS keyframes (no script, so it plays in
-// an interactive Svg's frame) and clipped to the text, so only the letters light up. No text metrics are available
-// here: the width is an estimate from an average glyph, as in the band's pill.
+// an interactive Svg's frame) and clipped to the text, so only the letters light up.
 export function shineSvg(text: string, color: string, opts: ShineOptions = {}): { source: string; width: number; height: number } {
 	const { fontSize = 13, weight = 600 } = opts
-	const width = Math.ceil(text.length * fontSize * 0.58) + 4
+	const width = Math.ceil(textEms(text) * fontSize) + 4
 	const height = Math.ceil(fontSize + 6)
 	const id = `shine-${shortHash(`${text}|${fontSize}|${weight}`)}`
 	const band = Math.max(SHINE.minBand, Math.round(width * SHINE.band))
@@ -416,5 +427,32 @@ export function iconSvg(icon: CardIcon, color: string, size: number): string {
 	return (
 		`<svg xmlns="${XMLNS}" viewBox="0 0 24 24" width="${num(size)}" height="${num(size)}">${circle}` +
 		`<g fill="none" stroke="${color}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${ICON_GLYPHS[icon]}</g></svg>`
+	)
+}
+
+export type BadgeKind = 'chip' | 'pill'
+
+// A Files-pane row's badges, as the filetree look draws them: a chip is the file's type in the mono face on a small
+// rounded fill, a pill its state on a fully rounded one. Sized from an average glyph, as the shine is.
+const BADGES: Record<BadgeKind, { fontSize: number; glyph: number; padX: number; height: number; radius: number; font: string }> = {
+	chip: { fontSize: 11, glyph: 0.62, padX: 6, height: 18, radius: 5, font: "ui-monospace, SFMono-Regular, Menlo, monospace" },
+	pill: { fontSize: 12, glyph: 0.56, padX: 9, height: 20, radius: 10, font: SHINE_FONT }
+}
+
+export function badgeSvg(kind: BadgeKind, text: string, fill: string, color: string): { source: string; width: number; height: number } {
+	const { fontSize, glyph, padX, height, radius, font } = BADGES[kind]
+	const width = Math.ceil(text.length * fontSize * glyph) + padX * 2
+	const source =
+		`${svgOpen(width, height)}<rect width="${width}" height="${height}" rx="${radius}" fill="${fill}"/>` +
+		`<text x="${num(width / 2)}" y="${num(height / 2)}" text-anchor="middle" dominant-baseline="central" ` +
+		`font-family="${font}" font-size="${fontSize}" font-weight="500" fill="${color}">${escapeXml(text)}</text></svg>`
+	return { source, width, height }
+}
+
+// A one-pixel rule, stretched to the width of its column as the bars are.
+export function ruleSvg(color: string): string {
+	return (
+		`<svg xmlns="${XMLNS}" viewBox="0 0 ${BAR_NATIVE_WIDTH} 1" width="${BAR_NATIVE_WIDTH}" height="1" preserveAspectRatio="none">` +
+		`<rect width="${BAR_NATIVE_WIDTH}" height="1" fill="${color}"/></svg>`
 	)
 }

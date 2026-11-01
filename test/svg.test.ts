@@ -1,7 +1,20 @@
 import { expect, test } from 'claude-code/testing'
 
 import { PALETTE, spriteCells, spriteGrid, spritePixels } from '../hooks/sprite'
-import { BAND_NATIVE_WIDTH, BAR_NATIVE_WIDTH, bandBarSvg, barSvg, escapeXml, iconSvg, pipHeight, pipSvg, pipWidth, shineSvg } from '../hooks/svg'
+import {
+	BAND_NATIVE_WIDTH,
+	BAR_NATIVE_WIDTH,
+	badgeSvg,
+	bandBarSvg,
+	barSvg,
+	escapeXml,
+	iconSvg,
+	pipHeight,
+	pipSvg,
+	pipWidth,
+	ruleSvg,
+	shineSvg
+} from '../hooks/svg'
 
 const rects = (svg: string) => svg.match(/<rect\b[^>]*>/g) ?? []
 const part = (svg: string, name: string) =>
@@ -316,7 +329,9 @@ test('shineSvg draws the name in its colour with a band sweeping across it on a 
 	expect(source).toMatch(/<clipPath id="[^"]+"><text[^>]*>PriceTable\.jsx<\/text><\/clipPath>/)
 	expect(source).toContain('<linearGradient')
 	expect(source).toContain(`width="${width}" height="${height}"`)
-	expect(width).toBe(Math.ceil('PriceTable.jsx'.length * 13 * 0.58) + 4)
+	// Sized letter by letter, so it ends where the name does: about 6.8 ems at 13px, and 4px of room.
+	expect(width).toBe(93)
+	expect(shineSvg('illi', '#000').width).toBeLessThan(shineSvg('mmmm', '#000').width)
 	expect(height).toBe(19)
 	expect(shineSvg('PriceTable.jsx', '#F0883E').source).toBe(source)
 })
@@ -375,4 +390,26 @@ test('the branch icon is the glyph alone, with no circle behind it', async () =>
 	expect(svg).toContain('stroke="#8B949E"')
 	expect(svg).not.toContain('fill-opacity')
 	expect(svg).not.toContain('fill="#8B949E"')
+})
+
+test('a badge is a word centred on a rounded fill, a chip in the mono face and a pill fully rounded', () => {
+	const chip = badgeSvg('chip', 'JSX', '#3A3420', '#E6C463')
+	expect(chip.source).toContain('rx="5" fill="#3A3420"')
+	expect(chip.source).toContain('fill="#E6C463">JSX</text>')
+	expect(chip.source).toContain('monospace')
+	expect(chip.height).toBe(18)
+	const pill = badgeSvg('pill', 'committed', '#1F3D26', '#7FDC8F')
+	expect(pill.source).toContain(`rx="${pill.height / 2}"`)
+	// Wider for a longer word, with room either side of it.
+	expect(pill.width).toBeGreaterThan(badgeSvg('pill', 'read', '#000', '#fff').width)
+	expect(pill.width).toBeGreaterThan(9 * 12 * 0.5 + 18)
+	// Text is escaped like every other drawing.
+	expect(badgeSvg('chip', '<&>', '#000', '#fff').source).toContain('&lt;&amp;&gt;')
+})
+
+test('a rule is one pixel tall and stretches to its column', () => {
+	const rule = ruleSvg('#3A3936')
+	expect(rule).toContain('preserveAspectRatio="none"')
+	expect(rule).toContain('height="1"')
+	expect(rule).toContain('fill="#3A3936"')
 })

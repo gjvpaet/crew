@@ -121,8 +121,21 @@ export function dirtyPaths(porcelainZ: string): Set<string> {
 const isInside = (root: string, path: string) => root !== '' && path.startsWith(root.endsWith('/') ? root : `${root}/`)
 const relativeTo = (root: string, path: string) => path.slice(root.replace(/\/$/, '').length + 1)
 const basename = (path: string) => path.slice(path.lastIndexOf('/') + 1)
-// Relative to the project folder, or the path itself outside it.
-const shownPath = (root: string, path: string) => (isInside(root, path) ? relativeTo(root, path) : path)
+// The folder a file is shown under, short enough to read beside its name: relative to the project; outside it, under
+// the name of the repository that holds it (`crew/docs`); outside any, its last two folders (`…/scratch/frames`).
+function shownFolder(root: string, path: string, tops: readonly string[]): string {
+	if (isInside(root, path)) return dirname(relativeTo(root, path))
+	const top = tops.filter(top => isInside(top, path)).reduce<string | null>((best, top) => (best && best.length >= top.length ? best : top), null)
+	if (top !== null) {
+		const name = basename(top.replace(/\/$/, ''))
+		const inner = dirname(relativeTo(top, path))
+		return inner ? `${name}/${inner}` : name
+	}
+	const folder = dirname(path)
+	const parts = folder.split('/').filter(Boolean)
+	return parts.length > 2 ? `\u2026/${parts.slice(-2).join('/')}` : folder
+}
+
 export const dirname = (path: string) => {
 	const at = path.lastIndexOf('/')
 	return at < 0 ? '' : at === 0 ? '/' : path.slice(0, at)
@@ -159,7 +172,7 @@ export type TouchedRow = {
 	key: string
 	path: string
 	name: string
-	// Relative to the project, '.' at its root, absolute outside it.
+	// Relative to the project, '.' at its root; outside it, as shownFolder puts it.
 	folder: string
 	state: FileState
 	// The live row's pill says what is happening (reading, editing); the others say what happened.
@@ -178,7 +191,9 @@ export function touchedRows(
 	entries: readonly FileEntry[],
 	root: string,
 	status: AgentStatusView,
-	lines: Record<string, [number, number]>
+	lines: Record<string, [number, number]>,
+	// The known repository tops, which name the folder of a file outside the project.
+	tops: readonly string[] = []
 ): TouchedRow[] {
 	const live = status === 'running' ? latestOf(entries) : undefined
 	// A tie goes to the later entry, as latestOf does, so the row that is live is also the first.
@@ -187,13 +202,12 @@ export function touchedRows(
 		.sort((a, b) => b.item.at - a.item.at || b.index - a.index)
 		.map(({ item }) => {
 			const isLive = item === live
-			const shown = shownPath(root, item.path)
 			const [added, removed] = lines[item.path] ?? [0, 0]
 			return {
 				key: `file:${item.path}`,
 				path: item.path,
 				name: basename(item.path),
-				folder: dirname(shown) || '.',
+				folder: shownFolder(root, item.path, tops) || '.',
 				state: item.state,
 				pill: isLive ? PRESENT[item.state] : item.state,
 				isLive,
@@ -209,7 +223,10 @@ export type RightNow = {
 	tone: FileState | 'waiting'
 	icon: 'eye' | 'pencil' | 'check' | 'pause'
 	title: string
+	// The live file's folder, or the summary of an ended agent.
 	subtitle: string
+	// The live file's own lines added and removed, drawn after the subtitle in their colours; 0 when unknown.
+	counts: { added: number; removed: number }
 	// Across the agent's files that have counts.
 	totals: { added: number; removed: number }
 	// The repository of the latest touch, when it is one of the known ones.
@@ -218,10 +235,6 @@ export type RightNow = {
 
 const ICON_OF: Record<FileState, RightNow['icon']> = { read: 'eye', edited: 'pencil', committed: 'check' }
 const DONE_VERB: Record<FileState, string> = { read: 'Read', edited: 'Edited', committed: 'Committed' }
-
-// '+12 −3'; a side that is 0 is left out, and so is the whole of it when both are.
-export const countsText = (added: number, removed: number) =>
-	[added > 0 ? `+${added}` : '', removed > 0 ? `\u2212${removed}` : ''].filter(Boolean).join(' ')
 
 // What the Right-now card shows: the live file while the agent runs or waits, a summary once it has ended.
 export function rightNow(
@@ -246,7 +259,7 @@ export function rightNow(
 			: Object.keys(repos)
 					.filter(top => latest.path.startsWith(top.endsWith('/') ? top : `${top}/`))
 					.reduce<string | null>((best, top) => (best === null || top.length > best.length ? top : best), null)
-	const base = { totals, repoTop }
+	const base = { totals, repoTop, counts: { added: 0, removed: 0 } }
 
 	if (isEndedStatus(status)) {
 		const counts = (['edited', 'committed', 'read'] as const)
@@ -269,14 +282,14 @@ export function rightNow(
 	if (!latest) {
 		return { ...base, label, tone: 'waiting', icon: 'pause', title: 'No files yet', subtitle: '' }
 	}
-	const shown = shownPath(root, latest.path)
 	return {
 		...base,
 		label,
 		tone: isRunning ? latest.state : 'waiting',
 		icon: isRunning ? ICON_OF[latest.state] : 'pause',
-		title: `${VERBS[latest.state]} ${basename(shown)}`,
-		subtitle: [dirname(shown), countsText(added, removed)].filter(Boolean).join('  ')
+		title: `${VERBS[latest.state]} ${basename(latest.path)}`,
+		subtitle: shownFolder(root, latest.path, Object.keys(repos)),
+		counts: { added, removed }
 	}
 }
 

@@ -350,7 +350,8 @@ test('right now names the live file with its folder and counts while the agent r
 		tone: 'edited',
 		icon: 'pencil',
 		title: 'Editing PriceTable.jsx',
-		subtitle: 'src/pricing  +12 \u22123',
+		subtitle: 'src/pricing',
+		counts: { added: 12, removed: 3 },
 		totals: { added: 12, removed: 3 },
 		repoTop: null
 	})
@@ -367,15 +368,32 @@ test('right now names the live file with its folder and counts while the agent r
 	})
 })
 
-test('the subtitle is the folder, the counts, or both, and an outside folder is absolute', () => {
-	const at = (path: string, counts: Record<string, [number, number]>) =>
-		rightNow([entry(path, 'edited')], 'running', '/repo', counts, {}).subtitle
-	expect(at('/repo/a.js', {})).toBe('')
-	expect(at('/repo/a.js', { '/repo/a.js': [2, 0] })).toBe('+2')
-	expect(at('/repo/a.js', { '/repo/a.js': [0, 5] })).toBe('\u22125')
-	expect(at('/repo/src/a.js', {})).toBe('src')
-	expect(at('/elsewhere/a.js', {})).toBe('/elsewhere')
-	expect(at('/a.js', {})).toBe('/')
+test('the subtitle is the folder, with the counts beside it, and a folder outside the project is kept short', () => {
+	const at = (path: string, counts: Record<string, [number, number]> = {}, repos = {}) =>
+		rightNow([entry(path, 'edited')], 'running', '/repo', counts, repos)
+	expect(at('/repo/a.js')).toMatchObject({ subtitle: '', counts: { added: 0, removed: 0 } })
+	expect(at('/repo/a.js', { '/repo/a.js': [2, 0] })).toMatchObject({ subtitle: '', counts: { added: 2, removed: 0 } })
+	expect(at('/repo/src/a.js').subtitle).toBe('src')
+	expect(at('/elsewhere/a.js').subtitle).toBe('/elsewhere')
+	expect(at('/a.js').subtitle).toBe('/')
+	// Under the name of the repository that holds it, else its last two folders.
+	const other = { '/Users/me/mods/crew': { branch: 'main', changed: 0 } }
+	expect(at('/Users/me/mods/crew/docs/plan.md', {}, other).subtitle).toBe('crew/docs')
+	expect(at('/Users/me/mods/crew/plan.md', {}, other).subtitle).toBe('crew')
+	expect(at('/private/tmp/claude/scratch/frames/f.jpg').subtitle).toBe('\u2026/scratch/frames')
+})
+
+test('a touched row outside the project names its folder the same short way', () => {
+	const tops = ['/Users/me/mods/crew', '/Users/me/mods']
+	const rows = touchedRows(
+		[entry('/Users/me/mods/crew/test/a.ts', 'edited', 2), entry('/private/tmp/claude/scratch/f.jpg', 'read', 1)],
+		'/repo',
+		'completed',
+		{},
+		tops
+	)
+	// The innermost repository wins.
+	expect(rows.map(row => row.folder)).toEqual(['crew/test', '\u2026/claude/scratch'])
 })
 
 test('an agent that waits shows WAITING in amber with a pause, whatever it touched last', () => {
@@ -421,8 +439,9 @@ test('right now totals the counts of every file the agent has', () => {
 	const lines: Record<string, [number, number]> = { '/r/a': [10, 1], '/r/b': [2, 4], '/r/gone': [99, 99] }
 	const now = rightNow(files, 'running', '/r', lines, {})
 	expect(now.totals).toEqual({ added: 12, removed: 5 })
-	// The latest file's own counts ride in the subtitle only.
-	expect('added' in now || 'removed' in now).toBe(false)
+	// The latest file's own counts are its own, apart from the totals.
+	expect(now.counts).toEqual({ added: 0, removed: 0 })
+	expect(rightNow(files.slice(0, 2), 'running', '/r', lines, {}).counts).toEqual({ added: 2, removed: 4 })
 	expect(rightNow(files.slice(0, 2), 'completed', '/r', lines, {}).totals).toEqual({ added: 12, removed: 5 })
 })
 

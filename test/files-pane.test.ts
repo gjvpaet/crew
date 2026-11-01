@@ -176,7 +176,8 @@ test('a Files pane nobody sees leaves the chevron unlit and says so', async ($, 
 // The kit hands back keys on Boxes and Buttons only, so a row's cells are read off its keyed Box:
 // [chip, name cell (the name and the folder), +added, −removed, pill], the counts only when known.
 const cells = async (files: any, key: string): Promise<any[]> => (await files.find({ key }))?.children ?? []
-const shown = (cell: any): string | undefined => cell?.children?.[0]
+// What a cell says: a Text's string, or the alt of the SVG Desktop draws a chip or a pill as.
+const shown = (cell: any): string | undefined => (cell?.type === 'Svg' ? cell.props.alt : cell?.children?.[0])
 // The pill is padded with non-breaking spaces, which trim takes off.
 const pillOf = async (files: any, path: string) => shown((await cells(files, `file:${path}`)).at(-1))?.trim()
 const nameCell = async (files: any, path: string): Promise<any[]> => (await cells(files, `file:${path}`))[1]?.children ?? []
@@ -222,21 +223,37 @@ test('the Files pane draws the Right-now card and a flat list of touched files, 
 		expect(await pillOf(files, '/repo/src/pricing/PriceTable.jsx')).toBe('edited')
 		expect(await pillOf(files, '/repo/src/pricing/usePrices.js')).toBe('read')
 		const pill = (await cells(files, 'file:/repo/src/pricing/PriceTable.jsx')).at(-1)
-		if (surface === 'desktop') expect(pill.props.color).toBe(STATE_COLORS.edited)
-		else expect(pill.props.backgroundColor).toBe(STATE_COLORS.edited)
-		// Only the live row is outlined, in its state colour.
-		expect((await files.find({ key: 'file:/Users/me/notes.md' }))?.props.borderColor).toBe(STATE_COLORS.read)
+		const livePill = (await cells(files, 'file:/Users/me/notes.md')).at(-1)
+		if (surface === 'desktop') {
+			// Desktop draws chips and pills as rounded SVGs in the mockup's colours: a settled pill light on a dark wash,
+			// the live one dark on its solid colour.
+			expect(pill.type).toBe('Svg')
+			expect(pill.props.source).toContain('fill="#47301F"')
+			expect(pill.props.source).toContain('fill="#FFB98A"')
+			expect(livePill.props.source).toContain(`fill="${STATE_COLORS.read}"`)
+			expect((await cells(files, 'file:/Users/me/notes.md'))[0].props.source).toContain('fill="#1F2F45"')
+		} else expect(pill.props.backgroundColor).toBe(STATE_COLORS.edited)
+		// Only the live row is outlined: light and filled with its state where SVG is drawn, in its colour in the terminal.
+		const liveRow = (await files.find({ key: 'file:/Users/me/notes.md' }))?.props
+		if (surface === 'desktop') expect([liveRow.borderColor, liveRow.backgroundColor]).toEqual(['#E8E6DF', '#2B2238'])
+		else expect(liveRow.borderColor).toBe(STATE_COLORS.read)
 		expect((await files.find({ key: 'file:/repo/src/pricing/usePrices.js' }))?.props.borderStyle).toBeUndefined()
-		// No commit yet: the legend leaves committed out, and there is no footer.
-		expect(await files.find({ type: 'Text', text: /^● committed$/ })).toBeUndefined()
+		// The legend always names all three states; with no commit yet there is no footer.
+		const legend = (await files.find({ key: 'legend' }))?.children ?? []
+		expect(legend.map((item: any) => item.children.map((part: any) => (typeof part === 'string' ? part : shown(part))).join(''))).toEqual([
+			'● read',
+			'● edited',
+			'● committed'
+		])
+		expect(legend[2].children[0].props.color).toBe(STATE_COLORS.committed)
 		expect(await files.find({ type: 'Text', text: /^committed / })).toBeUndefined()
 		await files.unmount()
 	}
 	await pane.unmount()
 })
 
-test('on Desktop only the live name shines, as an SVG, with a small open mark of its own', async ($, on) => {
-	await start($, on)
+test('on Desktop only the live name shines, as an SVG, and its folder shows the file in its folder', async ($, on) => {
+	const { ran, toasts } = await start($, on, { stdout: { 'uname -s': 'Darwin\n' } })
 	await $.tool.call(read('/repo/README.md', 'a1'))
 	await $.tool.call(edit('/repo/src/PriceTable.jsx', 'a1'))
 	const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
@@ -247,25 +264,26 @@ test('on Desktop only the live name shines, as an SVG, with a small open mark of
 	expect(shine.props.alt).toBe('PriceTable.jsx')
 	expect(shine.props.isInteractive).toBe(true)
 	expect(shine.props.source).toContain('@keyframes')
-	// The folder is plain dim text, as on every other row.
-	expect(folder.type).toBe('Text')
-	expect(folder.props.dimColor).toBe(true)
-	expect(shown(folder)).toBe('src')
-	// The press is a ↗ outside the name cell, which the name cannot squeeze, named after the file.
-	const row = await cells(files, 'file:/repo/src/PriceTable.jsx')
-	const open = row[2]
-	expect(open.type).toBe('Button')
-	expect(open.props.key).toBe('open-/repo/src/PriceTable.jsx')
-	expect(open.props.label).toBe('PriceTable.jsx')
-	expect(open.props.dimColor).toBe(true)
-	expect(shown(open.children[0])).toBe('\u2197')
+	// An SVG cannot sit in a Button, so the press is the folder, named after the file; it reveals rather than opens.
+	expect(folder.type).toBe('Button')
+	expect(folder.props.key).toBe('open-/repo/src/PriceTable.jsx')
+	expect(folder.props.label).toBe('PriceTable.jsx')
+	expect(shown(folder.children[0])).toBe('src')
+	expect(folder.children[0].props.color).toBe('#8D8B84')
+	// Nothing past the name cell but the pill: no open mark.
+	expect((await cells(files, 'file:/repo/src/PriceTable.jsx')).map((cell: any) => cell.type)).toEqual(['Svg', 'Box', 'Svg'])
+	await files.press({ key: 'open-/repo/src/PriceTable.jsx' })
+	expect(ran.at(-1)).toEqual(['open', '-R', '/repo/src/PriceTable.jsx'])
+	expect(toasts.some(toast => toast.includes('PriceTable.jsx'))).toBe(false)
 	// Another row's name is still its own Button.
 	expect((await nameCell(files, '/repo/README.md'))[0].props.key).toBe('open-/repo/README.md')
 	expect(await pillOf(files, '/repo/src/PriceTable.jsx')).toBe('editing')
-	// The other rows draw no SVG; the Right-now icon is the only other one.
+	// The other names draw no SVG.
 	expect((await nameCell(files, '/repo/README.md')).some((cell: any) => cell.type === 'Svg')).toBe(false)
-	const svgs = await files.findAll({ type: 'Svg' })
-	expect(svgs.map((svg: any) => svg.props.alt).filter((alt: string) => alt !== 'branch').sort()).toEqual(['PriceTable.jsx', 'pencil icon'])
+	const svgs = (await files.findAll({ type: 'Svg' })).map((svg: any) => svg.props.alt)
+	expect(svgs).toContain('pencil icon')
+	expect(svgs).toContain('divider')
+	expect(svgs.filter((alt: string) => alt === 'PriceTable.jsx')).toHaveLength(1)
 	expect((await files.find({ type: 'Text', text: /^Editing PriceTable\.jsx$/ }))?.text).toBe('Editing PriceTable.jsx')
 	expect((await files.find({ type: 'Text', text: /^RIGHT NOW$/ }))?.props.color).toBe(STATE_COLORS.edited)
 	await files.unmount()
@@ -311,9 +329,8 @@ test('the Right-now card sums up once the agent is done, and every pill turns pa
 	expect((await files.find({ type: 'Text', text: /^edited 1, read 1$/ }))?.text).toBe('edited 1, read 1')
 	expect(await pillOf(files, '/repo/b.js')).toBe('edited')
 	// Nothing is live once it is done, so no name shines.
-	expect((await files.findAll({ type: 'Svg' })).map((svg: any) => svg.props.alt).filter((alt: string) => alt !== 'branch')).toEqual([
-		'check icon'
-	])
+	expect((await files.findAll({ type: 'Svg' })).some((svg: any) => svg.props.isInteractive)).toBe(false)
+	expect((await files.findAll({ type: 'Svg' })).map((svg: any) => svg.props.alt)).toContain('check icon')
 	await files.unmount()
 	const terminal = await $.ui.mount({ ...FILES, surface: 'terminal' })
 	expect(await terminal.find({ type: 'Text', text: /^✓$/ })).toBeDefined()
@@ -357,28 +374,32 @@ test('the flash settles even when nothing runs to redraw the pane', async ($, on
 	await $.turn.complete({ turnId: 't1', ...ended } as any)
 	await clock.advance(5000)
 	const files = await $.ui.mount({ ...FILES, surface: 'desktop' })
-	expect((await files.find({ key: 'now' }))?.props.borderColor).toBeUndefined()
+	expect((await files.find({ key: 'now' }))?.props.borderColor).toBe('#3A3936')
 	// A late touch, as a slow Bash scan lands after the turn has ended.
 	await $.tool.call(read('/repo/b.js', 'a1'))
 	expect((await files.find({ key: 'now' }))?.props.borderColor).toBe('#E8E6DF')
 	await clock.advance(1500)
-	expect((await files.find({ key: 'now' }))?.props.borderColor).toBeUndefined()
+	expect((await files.find({ key: 'now' }))?.props.borderColor).toBe('#3A3936')
 	await files.unmount()
 	await pane.unmount()
 })
 
-test('the Right-now card flashes its outline right after a touch, then settles', async ($, on) => {
+test('the Right-now card is outlined light while its agent runs, as in the mockup', async ($, on) => {
 	const { clock } = await start($, on)
 	await $.tool.call(read('/repo/a.js', 'a1'))
 	const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
 	await pane.press({ key: 'files-a1' })
 	const files = await $.ui.mount({ ...FILES, surface: 'desktop' })
-	expect((await files.find({ key: 'now' }))?.props.borderColor).toBe('#E8E6DF')
+	expect((await files.find({ key: 'now' }))?.props).toMatchObject({ borderColor: '#E8E6DF', backgroundColor: '#232321' })
 	await clock.advance(1500)
-	expect((await files.find({ key: 'now' }))?.props.borderColor).toBeUndefined()
-	await $.tool.call(read('/repo/b.js', 'a1'))
 	expect((await files.find({ key: 'now' }))?.props.borderColor).toBe('#E8E6DF')
 	await files.unmount()
+	// The terminal keeps the theme's own outline once the flash is over, and no fill.
+	await $.turn.complete({ turnId: 'x', agentId: 'a1', answer: '', durationMs: 1, isAborted: false, reason: 'answer' } as any)
+	const terminal = await $.ui.mount({ ...FILES, surface: 'terminal' })
+	expect((await terminal.find({ key: 'now' }))?.props.borderColor).toBeUndefined()
+	expect((await terminal.find({ key: 'now' }))?.props.backgroundColor).toBeUndefined()
+	await terminal.unmount()
 	await pane.unmount()
 })
 
@@ -449,6 +470,8 @@ const DARWIN = { stdout: { 'uname -s': 'Darwin\n' }, exits: { 'test -x /repo/gra
 async function openRow($: any, on: any, options: Options, paths: string[]) {
 	const run = await start($, on, { ...DARWIN, ...options })
 	for (const path of paths) await $.tool.call(read(path, 'a1'))
+	// Ended, so no row is live and every name is its own Button.
+	await $.turn.complete({ turnId: 'x', agentId: 'a1', answer: '', durationMs: 1, isAborted: false, reason: 'answer' } as any)
 	const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
 	await pane.press({ key: 'files-a1' })
 	const files = await $.ui.mount({ ...FILES, surface: 'desktop' })
@@ -522,6 +545,7 @@ test('pressing a file row opens it in the default app, and a failed open says so
 	})
 	await $.tool.call(read('/repo/a.js', 'a1'))
 	await $.tool.call(read('/repo/gone.js', 'a1'))
+	await $.turn.complete({ turnId: 'x', agentId: 'a1', answer: '', durationMs: 1, isAborted: false, reason: 'answer' } as any)
 	const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
 	await pane.press({ key: 'files-a1' })
 	const files = await $.ui.mount({ ...FILES, surface: 'desktop' })
@@ -584,11 +608,10 @@ test('a successful git commit turns the clean edited files green and shows the S
 	const files = await $.ui.mount({ ...FILES, surface: 'desktop' })
 	const committed = (await cells(files, 'file:/repo/test/PriceTable.test.jsx')).at(-1)
 	expect(shown(committed)?.trim()).toBe('committed')
-	expect(committed.props.color).toBe(STATE_COLORS.committed)
+	expect(committed.props.source).toContain('fill="#7FDC8F"')
 	expect(await stateOf(files, '/repo/src/pricing/PriceTable.jsx')).toBe('edited')
 	expect(await stateOf(files, '/repo/src/pricing/usePrices.js')).toBe('read')
 	expect(await stateOf(files, '/Users/me/notes.md')).toBe('edited')
-	expect(await files.find({ type: 'Text', text: /^● committed$/ })).toBeDefined()
 	expect((await files.find({ type: 'Text', text: /^committed a1c9e42$/ }))?.text).toBe('committed a1c9e42')
 	await files.unmount()
 	await pane.unmount()
@@ -1118,18 +1141,21 @@ test('once git has answered, the rows show their line counts and the card its br
 	await pane.press({ key: 'files-a1' })
 	for (const surface of ['desktop', 'terminal'] as const) {
 		const files = await $.ui.mount({ ...FILES, surface })
-		// The live row's counts sit just before its pill (past Desktop's open mark).
+		// The live row's counts sit just before its pill.
 		const [added, removed] = (await cells(files, 'file:/repo/a.js')).slice(-3, -1)
 		expect([shown(added), shown(removed)]).toEqual(['+12', '\u22123'])
 		expect([added.props.color, removed.props.color]).toEqual(['#7FC77F', '#F07A7A'])
 		// A row with no counts draws none.
 		expect(await cells(files, 'file:/repo/b.md')).toHaveLength(3)
-		// At the project root the subtitle is the counts alone.
-		expect((await files.find({ type: 'Text', text: /^\+12 \u22123$/ }))?.text).toBe('+12 \u22123')
+		// At the project root the subtitle is the counts alone, each in its colour.
+		const sub = (await files.find({ key: 'now-sub' }))?.children ?? []
+		expect(sub.map(shown)).toEqual(['+12', '\u22123'])
+		expect(sub.map((part: any) => part.props.color)).toEqual(['#7FC77F', '#F07A7A'])
 		const branch = (await files.find({ key: 'branch' }))?.children ?? []
 		expect(branch[0].type).toBe(surface === 'desktop' ? 'Svg' : 'Text')
 		expect(shown(branch[1].children[0])).toBe('feat/pricing')
-		expect(shown(branch[2])).toBe('+12 \u22123 · 2 changed')
+		expect(branch.slice(2).map(shown).join(' ')).toBe('+12 \u22123 · 2 changed')
+		expect(branch.at(-1).props.color).toBe('#E6C463')
 		await files.unmount()
 	}
 	await pane.unmount()
@@ -1147,7 +1173,7 @@ test('a clean repository and a detached HEAD read as such on the branch row', as
 	const files = await $.ui.mount({ ...FILES, surface: 'desktop' })
 	const branch = (await files.find({ key: 'branch' }))?.children ?? []
 	expect(shown(branch[1].children[0])).toBe('detached')
-	expect(shown(branch[2])).toBe('clean')
+	expect(branch.slice(2).map(shown)).toEqual(['clean'])
 	await files.unmount()
 	await pane.unmount()
 })
