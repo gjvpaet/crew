@@ -41,6 +41,7 @@ async function start($: any, on: any, options: Options = {}) {
 	const opened: Array<{ id: string; title: string }> = []
 	const closed: string[] = []
 	const ran: string[][] = []
+	const stdins: Array<{ argv: string[]; stdin: string | undefined }> = []
 	const toasts: string[] = []
 	on('command.register', () => ({ value: { command: 'crew' } }))
 	on('tool.register', () => ({ value: { tool: 'mcp__crew__set_mascot' } }))
@@ -61,6 +62,8 @@ async function start($: any, on: any, options: Options = {}) {
 	on('process.run', (_: unknown, e: any) => {
 		const argv: string[] = [...e.argv]
 		ran.push(argv)
+		// The kit hands `$.process.run`'s second argument to its hooks as `e.init`.
+		stdins.push({ argv, stdin: e.init?.stdin })
 		if (options.throwing && argv.join(' ').startsWith(options.throwing)) throw new Error('could not start')
 		const stdout = String(answer(options.stdout, argv) ?? '')
 		const exitCode = Number(answer(options.exits, argv) ?? 0)
@@ -87,7 +90,7 @@ async function start($: any, on: any, options: Options = {}) {
 	await $.turn.start({ text: 'Build the pricing page', turnId: 't1' })
 	await $.agent.spawn({ prompt: 'go', description: 'Implement the price table', subagentType: 'general-purpose' })
 	await $.agent.spawn({ prompt: 'go', description: 'Research competitor pricing', subagentType: 'Explore' })
-	return { clock, opened, closed, ran, toasts }
+	return { clock, opened, closed, ran, stdins, toasts }
 }
 
 const read = (path: string, agentId?: string) => ({ tool: 'Read', file_path: path, ...(agentId ? { agentId } : {}) }) as any
@@ -598,7 +601,7 @@ test('the files a Bash command rewrote are recorded as edited for the agent that
 	expect(await stateOf(files, '/repo/lib/notebook.ts')).toBe('edited')
 	expect(await stateOf(files, '/repo/components/card.tsx')).toBe('edited')
 	// The marker is made before the command and removed once the scan is done.
-	expect(ran).toContainEqual(['mktemp', '-t', 'crew-mark'])
+	expect(ran).toContainEqual(['mktemp', '-t', 'crew-mark.XXXXXX'])
 	expect(ran).toContainEqual(['rm', '-f', MARK])
 	const [scan] = finds(ran)
 	expect(scan.slice(0, 2)).toEqual(['find', '/repo'])
@@ -709,5 +712,81 @@ test('a command that edits and commits records its files before the commit check
 	expect(await stateOf(files, '/repo/src/a.js')).toBe('committed')
 	expect((await files.find({ type: 'Text', text: /^committed abc1234$/ }))?.text).toBe('committed abc1234')
 	await files.unmount()
+	await pane.unmount()
+})
+
+const IGNORE = `${GIT} /repo check-ignore`
+
+test('git-ignored files a Bash command wrote are dropped from what it is recorded as editing', async ($, on) => {
+	const { clock, ran, stdins } = await start($, on, {
+		stdout: {
+			mktemp: `${MARK}\n`,
+			[`${GIT} /repo rev-parse --show-cdup`]: '\n',
+			'find /repo': found('/repo/src/a.ts', '/repo/server.log'),
+			[IGNORE]: found('/repo/server.log')
+		},
+		// check-ignore exits 0 when some path is ignored.
+		exits: { [IGNORE]: 0 }
+	})
+	await $.tool.call(bash('node build.js', 'a1'))
+	await clock.settle()
+	expect(ran).toContainEqual(['git', '--no-optional-locks', '-C', '/repo', 'check-ignore', '-z', '--stdin'])
+	const asked = stdins.find(item => item.argv.includes('check-ignore'))
+	expect(asked?.stdin).toBe(found('/repo/src/a.ts', '/repo/server.log'))
+	const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	expect((await pane.find({ key: 'files-a1' }))?.text).toBe('▸ 1')
+	await pane.press({ key: 'files-a1' })
+	const files = await $.ui.mount({ ...FILES, surface: 'desktop' })
+	expect(await stateOf(files, '/repo/src/a.ts')).toBe('edited')
+	expect(await files.find({ key: 'file:/repo/server.log' })).toBeUndefined()
+	await files.unmount()
+	await pane.unmount()
+})
+
+// One path git ignores and one it does not, with check-ignore failing the way `options` says; both stay recorded.
+async function keepsBoth($: any, on: any, options: Options) {
+	const { clock } = await start($, on, {
+		...options,
+		stdout: {
+			mktemp: `${MARK}\n`,
+			[`${GIT} /repo rev-parse --show-cdup`]: '\n',
+			'find /repo': found('/repo/src/a.ts', '/repo/server.log'),
+			...options.stdout
+		}
+	})
+	await $.tool.call(bash('node build.js', 'a1'))
+	await clock.settle()
+	const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	expect((await pane.find({ key: 'files-a1' }))?.text).toBe('▸ 2')
+	await pane.unmount()
+}
+
+test('check-ignore exiting 1 means nothing is ignored, so every path stays', async ($, on) => {
+	await keepsBoth($, on, { exits: { [IGNORE]: 1 } })
+})
+
+test('a check-ignore that fails, or cannot run, keeps every path', async ($, on) => {
+	// Whatever it printed before failing is not to be trusted.
+	await keepsBoth($, on, { exits: { [IGNORE]: 128 }, stdout: { [IGNORE]: found('/repo/server.log') } })
+})
+
+test('a check-ignore that throws keeps every path', async ($, on) => {
+	await keepsBoth($, on, { throwing: IGNORE })
+})
+
+test('the cap counts what is left once the ignored files are gone', async ($, on) => {
+	const paths = Array.from({ length: 101 }, (_, at) => `/repo/gen/f${at}.js`)
+	const { clock } = await start($, on, {
+		stdout: {
+			mktemp: `${MARK}\n`,
+			[`${GIT} /repo rev-parse --show-cdup`]: '\n',
+			'find /repo': found(...paths),
+			[IGNORE]: found(paths[0])
+		}
+	})
+	await $.tool.call(bash('npm run generate', 'a1'))
+	await clock.settle()
+	const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	expect((await pane.find({ key: 'files-a1' }))?.text).toBe('▸ 100')
 	await pane.unmount()
 })

@@ -338,6 +338,14 @@ test('changedFiles splits find’s NUL output, drops empties and gives up past t
 	expect(changedFiles(many(3), 2)).toEqual([])
 })
 
+test('changedFiles leaves out the ignored paths before it counts against the cap', () => {
+	expect(changedFiles('/r/a.ts\0/r/s.log\0', 100, '/r/s.log\0')).toEqual(['/r/a.ts'])
+	expect(changedFiles('/r/a.ts\0', 100, '')).toEqual(['/r/a.ts'])
+	const many = (count: number) => Array.from({ length: count }, (_, at) => `/r/f${at}.js\0`).join('')
+	expect(changedFiles(many(102), 100, '/r/f0.js\0/r/f1.js\0')).toHaveLength(100)
+	expect(changedFiles(many(102), 100, '/r/f0.js\0')).toEqual([])
+})
+
 test('the scan skips folders that hold dependencies, builds and caches', () => {
 	expect(SCAN_PRUNE.slice(0, 2)).toEqual(['.git', 'node_modules'])
 	expect(SCAN_PRUNE).toContain('__pycache__')

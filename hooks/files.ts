@@ -97,9 +97,11 @@ export const SCAN_PRUNE = [
 	'.parcel-cache', '.venv', 'venv', '__pycache__', 'target', '.gradle', '.idea'
 ]
 
-// The paths `find -print0` listed. Past `cap` it was an install or a build rather than an agent's edit, so none count.
-export function changedFiles(stdout: string, cap = 100): string[] {
-	const paths = stdout.split('\0').filter(Boolean).map(posix)
+// The paths `find -print0` listed, less those `git check-ignore -z` named (logs, .env, output off the prune list). The
+// cap counts what is left: past it, it was an install or a build rather than an agent's edit, so none count.
+export function changedFiles(stdout: string, cap = 100, ignored = ''): string[] {
+	const skip = new Set(ignored.split('\0').filter(Boolean).map(posix))
+	const paths = stdout.split('\0').filter(Boolean).map(posix).filter(path => !skip.has(path))
 	return paths.length > cap ? [] : paths
 }
 

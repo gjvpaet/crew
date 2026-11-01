@@ -103,10 +103,11 @@ const MARK_MS = 3_000
 const SCAN_MS = 5_000
 
 // Before a Bash command runs: an empty file whose mtime is "before", for `find -newer` to compare against afterwards.
+// The X's make it a template for GNU mktemp, which refuses a bare name; BSD/macOS takes it as a prefix.
 // Undefined when it cannot be made, which skips the scan; it can never keep the command from running.
 async function markBash($: EngineInterface): Promise<string | undefined> {
 	try {
-		const made = await $.process.run(['mktemp', '-t', 'crew-mark'], { timeoutMs: MARK_MS })
+		const made = await $.process.run(['mktemp', '-t', 'crew-mark.XXXXXX'], { timeoutMs: MARK_MS })
 		return made.exitCode === 0 ? made.stdout.trim() || undefined : undefined
 	} catch {
 		return undefined
@@ -131,6 +132,20 @@ async function afterBash($: EngineInterface, command: string, agentId: string | 
 	if (isCommit) await checkCommit($)
 }
 
+// What git ignores among these paths, as its NUL-separated output. Exit 1 is "none ignored"; any other failure, or a
+// throw, leaves every path counting, since an edit shown wrongly beats one lost.
+async function ignoredAmong($: EngineInterface, top: string, paths: string[]): Promise<string> {
+	try {
+		const asked = await $.process.run(['git', '--no-optional-locks', '-C', top, 'check-ignore', '-z', '--stdin'], {
+			stdin: paths.map(path => `${path}\0`).join(''),
+			timeoutMs: GIT_MS
+		})
+		return asked.exitCode === 0 ? asked.stdout : ''
+	} catch {
+		return ''
+	}
+}
+
 async function recordBashEdits($: EngineInterface, command: string, agentId: string | undefined, marker: string) {
 	// A leading `cd` is where the command worked: the session folder is only where it began.
 	const cwd = posix(await $.session.cwd())
@@ -146,7 +161,9 @@ async function recordBashEdits($: EngineInterface, command: string, agentId: str
 		{ timeoutMs: SCAN_MS }
 	)
 	// find exits non-zero over one unreadable folder yet still lists the rest, so its output counts either way.
-	for (const path of changedFiles(scan.stdout)) {
+	const candidates = changedFiles(scan.stdout, Infinity)
+	if (candidates.length === 0) return
+	for (const path of changedFiles(scan.stdout, undefined, await ignoredAmong($, top, candidates))) {
 		await apply($, { kind: 'touch', at: await $.clock.now(), agentId, path, touch: 'edit' })
 	}
 }
