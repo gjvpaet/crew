@@ -4,6 +4,7 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 import type { AgentStatusView, MascotPrefs } from '../types'
 import { registerBand } from './band'
 import { dirtyPaths, isGitCommit, joinUp, posix, touchOf } from './files'
+import { registerFilesPane } from './files-pane'
 import { SET_MASCOT_SPEC, SET_MASCOT_TOOL, applyMascotChange, parseMascotInput, sanitizeMascots } from './mascot'
 import { isMoving, openPane, registerPanel, syncPaneShown } from './panel'
 import { TASK_TOOLS } from './tasks'
@@ -290,4 +291,5 @@ export const register: Register = on => {
 		isSidebar = isFullscreen
 	})
 	registerPanel(on)
+	registerFilesPane(on)
 }

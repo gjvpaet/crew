@@ -143,3 +143,84 @@ test('a Files pane nobody sees leaves the chevron unlit and says so', async ($, 
 	expect(toasts.some(toast => toast.includes('Files pane'))).toBe(true)
 	await ui.unmount()
 })
+
+const NB = '\u00a0'
+
+// The kit hands back keys on Boxes and Buttons only, so a row's cells are read off its keyed Box: for a file
+// [guide, dot, name cell, state word], for a folder [guide, name].
+const cells = async (files: any, key: string): Promise<any[]> => (await files.find({ key }))?.children ?? []
+const shown = (cell: any): string | undefined => cell?.children?.[0]
+
+test('before any card is chosen the Files pane says how to fill it', async ($, on) => {
+	await start($, on)
+	const files = await $.ui.mount({ ...FILES, surface: 'desktop' })
+	expect((await files.find({ type: 'Text', text: /Press ▸/ }))?.text).toBe('Press ▸ on a card in the Agents pane to see its files.')
+	await files.unmount()
+})
+
+test('the Files pane draws a nested tree with merged folders and each file state', async ($, on) => {
+	await start($, on)
+	await $.tool.call(read('/repo/src/pricing/usePrices.js', 'a1'))
+	await $.tool.call({ tool: 'Write', file_path: '/repo/test/PriceTable.test.jsx', content: 'x', agentId: 'a1' } as any)
+	await $.tool.call(edit('/repo/src/pricing/PriceTable.jsx', 'a1'))
+	await $.tool.call(read('/Users/me/notes.md', 'a1'))
+	const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	await pane.press({ key: 'files-a1' })
+	for (const surface of ['desktop', 'terminal'] as const) {
+		const files = await $.ui.mount({ ...FILES, surface })
+		expect((await files.find({ type: 'Text', text: /^RIGHT NOW$/ }))?.text).toBe('RIGHT NOW')
+		expect((await files.find({ type: 'Text', text: /^Reading notes\.md$/ }))?.text).toBe('Reading notes.md')
+		expect((await files.find({ type: 'Text', text: /^in / }))?.text).toBe('in /Users/me')
+		expect((await files.find({ type: 'Text', text: /TOUCHED/ }))?.text).toBe('TOUCHED · 4 FILES')
+		expect(shown((await cells(files, 'dir:/src/pricing'))[1])).toBe('src/pricing/')
+		expect(shown((await cells(files, 'file:/repo/src/pricing/usePrices.js'))[0])).toBe(`│${NB}└`)
+		expect((await files.find({ key: 'open-/repo/src/pricing/PriceTable.jsx' }))?.text).toBe('PriceTable.jsx')
+		const state = (await cells(files, 'file:/repo/src/pricing/PriceTable.jsx'))[3]
+		expect(shown(state)).toBe('edited')
+		expect(state.props.color).toBe('#F0883E')
+		expect((await cells(files, 'file:/repo/src/pricing/usePrices.js'))[3].props.color).toBe('#A371F7')
+		expect((await cells(files, 'out:/outside project'))[1].props.dimColor).toBe(true)
+		// No commit yet: the legend leaves committed out, and there is no footer.
+		expect(await files.find({ type: 'Text', text: /^● committed$/ })).toBeUndefined()
+		expect(await files.find({ type: 'Text', text: /^committed / })).toBeUndefined()
+		expect(await files.findAll({ type: 'Svg' })).toHaveLength(0)
+		await files.unmount()
+	}
+	await pane.unmount()
+})
+
+test('the live file’s dot pulses while its agent runs, and the header sums up once it is done', async ($, on) => {
+	const { clock } = await start($, on)
+	await $.tool.call(read('/repo/a.js', 'a1'))
+	await $.tool.call(edit('/repo/b.js', 'a1'))
+	const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	await pane.press({ key: 'files-a1' })
+	const files = await $.ui.mount({ ...FILES, surface: 'desktop' })
+	const dotOf = async (path: string) => (await cells(files, `file:${path}`))[1]?.props.color
+	const first = await dotOf('/repo/b.js')
+	await clock.advance(500)
+	const second = await dotOf('/repo/b.js')
+	expect(first).not.toBe(second)
+	// Only the live file pulses.
+	expect(await dotOf('/repo/a.js')).toBe('#A371F7')
+	await $.turn.complete({ turnId: 'x', agentId: 'a1', answer: '', durationMs: 1, isAborted: false, reason: 'answer' } as any)
+	expect((await files.find({ type: 'Text', text: /^DONE$/ }))?.text).toBe('DONE')
+	expect((await files.find({ type: 'Text', text: /^edited 1, read 1$/ }))?.text).toBe('edited 1, read 1')
+	expect(await dotOf('/repo/b.js')).toBe('#F0883E')
+	await files.unmount()
+	await pane.unmount()
+})
+
+test('a long file list stays inside the drawing budget with a count of the rest', async ($, on) => {
+	await start($, on)
+	for (let i = 0; i < 300; i++) await $.tool.call(read(`/repo/src/f${String(i).padStart(3, '0')}.js`, 'a1'))
+	const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	expect((await pane.find({ key: 'files-a1' }))?.text).toBe('▸ 200')
+	await pane.press({ key: 'files-a1' })
+	const files = await $.ui.mount({ ...FILES, surface: 'desktop' })
+	// 150 rows: the src/ folder and 149 of its 200 files.
+	expect(await files.findAll({ type: 'Button' })).toHaveLength(149)
+	expect((await files.find({ type: 'Text', text: /more$/ }))?.text).toBe('+ 51 more')
+	await files.unmount()
+	await pane.unmount()
+})
