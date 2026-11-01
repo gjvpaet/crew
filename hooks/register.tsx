@@ -136,7 +136,14 @@ async function checkCommit($: EngineInterface, agentId: string | undefined) {
 			const status = await git(top, 'status', '--porcelain', '-z', '--ignored', '--untracked-files=all', '--', ...paths)
 			if (status.exitCode !== 0) continue
 			const dirty = new Set([...dirtyPaths(status.stdout)].map(path => `${top}/${path}`))
-			const clean = paths.filter(path => !dirty.has(path))
+			const unlisted = paths.filter(path => !dirty.has(path))
+			if (unlisted.length === 0) continue
+			// Status lists nothing for a file that was written, deleted and never committed, so a clean file counts
+			// as committed only if git tracks it.
+			const tracked = await git(top, 'ls-files', '-z', '--full-name', '--', ...unlisted)
+			if (tracked.exitCode !== 0) continue
+			const known = new Set(tracked.stdout.split('\0').filter(Boolean).map(path => `${top}/${path}`))
+			const clean = unlisted.filter(path => known.has(path))
 			if (clean.length === 0) continue
 			const head = await git(top, 'rev-parse', '--short', 'HEAD')
 			committed.push(...clean)

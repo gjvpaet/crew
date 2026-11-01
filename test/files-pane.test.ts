@@ -331,3 +331,176 @@ test('a card dropped by a new prompt leaves the Files pane with its how-to messa
 	await files.unmount()
 	await pane.unmount()
 })
+
+test('pressing a file row opens it in the default app, and a failed open says so', async ($, on) => {
+	// Not executable (`test -x` exits 1), so both rows open rather than reveal.
+	const { clock, ran, toasts } = await start($, on, {
+		stdout: { uname: 'Darwin\n' },
+		exits: { 'test -x': 1, 'open /repo/gone.js': 1 }
+	})
+	await $.tool.call(read('/repo/a.js', 'a1'))
+	await $.tool.call(read('/repo/gone.js', 'a1'))
+	const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	await pane.press({ key: 'files-a1' })
+	const files = await $.ui.mount({ ...FILES, surface: 'desktop' })
+	await files.press({ key: 'open-/repo/a.js' })
+	await clock.settle()
+	expect(ran).toContainEqual(['open', '/repo/a.js'])
+	expect(toasts.some(toast => toast.includes("couldn't open"))).toBe(false)
+	await files.press({ key: 'open-/repo/gone.js' })
+	await clock.settle()
+	expect(toasts.some(toast => toast.includes("couldn't open gone.js"))).toBe(true)
+	await files.unmount()
+	await pane.unmount()
+})
+
+const GIT = 'git --no-optional-locks -C'
+
+const stateOf = async (files: any, path: string) => shown((await cells(files, `file:${path}`))[3])
+
+test('a successful git commit turns the clean edited files green and shows the SHA', async ($, on) => {
+	const { clock, ran } = await start($, on, {
+		stdout: {
+			[`${GIT} /repo/src/pricing rev-parse --show-cdup`]: '../../\n',
+			[`${GIT} /repo/test rev-parse --show-cdup`]: '../\n',
+			[`${GIT} /repo status`]: ' M src/pricing/PriceTable.jsx\0',
+			[`${GIT} /repo ls-files`]: 'test/PriceTable.test.jsx\0',
+			[`${GIT} /repo rev-parse --short HEAD`]: 'a1c9e42\n'
+		},
+		// Outside any repository.
+		exits: { [`${GIT} /Users/me rev-parse`]: 128 }
+	})
+	await $.tool.call(edit('/repo/src/pricing/PriceTable.jsx', 'a1'))
+	await $.tool.call({ tool: 'Write', file_path: '/repo/test/PriceTable.test.jsx', content: 'x', agentId: 'a1' } as any)
+	await $.tool.call(read('/repo/src/pricing/usePrices.js', 'a1'))
+	await $.tool.call(edit('/Users/me/notes.md', 'a1'))
+	await $.tool.call({
+		tool: 'Bash',
+		command: 'GIT_CONFIG_GLOBAL=/dev/null git add test && GIT_CONFIG_GLOBAL=/dev/null git commit -m "Add the test"',
+		agentId: 'a1'
+	} as any)
+	await clock.settle()
+	expect(ran).toContainEqual([
+		'git',
+		'--no-optional-locks',
+		'-C',
+		'/repo',
+		'status',
+		'--porcelain',
+		'-z',
+		'--ignored',
+		'--untracked-files=all',
+		'--',
+		'/repo/src/pricing/PriceTable.jsx',
+		'/repo/test/PriceTable.test.jsx'
+	])
+	const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	await pane.press({ key: 'files-a1' })
+	const files = await $.ui.mount({ ...FILES, surface: 'desktop' })
+	const committed = (await cells(files, 'file:/repo/test/PriceTable.test.jsx'))[3]
+	expect(shown(committed)).toBe('committed')
+	expect(committed.props.color).toBe(STATE_COLORS.committed)
+	expect(await stateOf(files, '/repo/src/pricing/PriceTable.jsx')).toBe('edited')
+	expect(await stateOf(files, '/repo/src/pricing/usePrices.js')).toBe('read')
+	expect(await stateOf(files, '/Users/me/notes.md')).toBe('edited')
+	expect(await files.find({ type: 'Text', text: /^● committed$/ })).toBeDefined()
+	expect((await files.find({ type: 'Text', text: /^committed a1c9e42$/ }))?.text).toBe('committed a1c9e42')
+	await files.unmount()
+	await pane.unmount()
+})
+
+test('an agent working in a git worktree is checked in that worktree', async ($, on) => {
+	const worktree = '/repo/.claude/worktrees/w1'
+	const { clock, ran } = await start($, on, {
+		stdout: {
+			// The folder is the worktree's own top: show-cdup prints an empty line.
+			[`${GIT} ${worktree} rev-parse --show-cdup`]: '\n',
+			[`${GIT} ${worktree} ls-files`]: 'b.js\0',
+			[`${GIT} ${worktree} rev-parse --short HEAD`]: 'f00ba47\n'
+		}
+	})
+	await $.tool.call(edit(`${worktree}/b.js`, 'a1'))
+	await $.tool.call({ tool: 'Bash', command: 'git commit -am "b"', agentId: 'a1' } as any)
+	await clock.settle()
+	expect(ran.some(argv => argv.join(' ').startsWith(`${GIT} ${worktree} status`))).toBe(true)
+	// Never checked against the main checkout.
+	expect(ran.some(argv => argv.join(' ').startsWith(`${GIT} /repo status`))).toBe(false)
+	const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	await pane.press({ key: 'files-a1' })
+	const files = await $.ui.mount({ ...FILES, surface: 'desktop' })
+	expect(await stateOf(files, `${worktree}/b.js`)).toBe('committed')
+	expect((await files.find({ type: 'Text', text: /^committed f00ba47$/ }))?.text).toBe('committed f00ba47')
+	await files.unmount()
+	await pane.unmount()
+})
+
+test('a file the agent wrote and deleted without committing never shows as committed', async ($, on) => {
+	const { clock, ran } = await start($, on, {
+		stdout: {
+			[`${GIT} /repo rev-parse --show-cdup`]: '\n',
+			// git lists nothing for either file: one is committed, the other is gone and was never tracked.
+			[`${GIT} /repo status`]: '',
+			[`${GIT} /repo ls-files`]: 'kept.js\0',
+			[`${GIT} /repo rev-parse --short HEAD`]: 'c0ffee1\n'
+		}
+	})
+	await $.tool.call(edit('/repo/kept.js', 'a1'))
+	await $.tool.call({ tool: 'Write', file_path: '/repo/probe.js', content: 'x', agentId: 'a1' } as any)
+	await $.tool.call({ tool: 'Bash', command: 'git commit -am kept', agentId: 'a1' } as any)
+	await clock.settle()
+	expect(ran).toContainEqual([
+		'git',
+		'--no-optional-locks',
+		'-C',
+		'/repo',
+		'ls-files',
+		'-z',
+		'--full-name',
+		'--',
+		'/repo/kept.js',
+		'/repo/probe.js'
+	])
+	const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	await pane.press({ key: 'files-a1' })
+	const files = await $.ui.mount({ ...FILES, surface: 'desktop' })
+	expect(await stateOf(files, '/repo/kept.js')).toBe('committed')
+	expect(await stateOf(files, '/repo/probe.js')).toBe('edited')
+	await files.unmount()
+	await pane.unmount()
+})
+
+test('no check, a failed check or nothing clean leaves the files edited and stamps no SHA', async ($, on) => {
+	const { clock, ran } = await start($, on, {
+		stdout: {
+			[`${GIT} /repo/src rev-parse --show-cdup`]: '../\n',
+			// Still dirty after the commit, and its new sibling ignored.
+			[`${GIT} /repo status`]: ' M src/a.js\0!! src/dist.js\0'
+		},
+		exits: { [`${GIT} /elsewhere rev-parse`]: 128 }
+	})
+	await $.tool.call(edit('/repo/src/a.js', 'a1'))
+	await $.tool.call({ tool: 'Write', file_path: '/repo/src/dist.js', content: 'x', agentId: 'a1' } as any)
+	await $.tool.call({ tool: 'Bash', command: 'git log --grep commit', agentId: 'a1' } as any)
+	await $.tool.call({ tool: 'Bash', command: 'git commit -am x', run_in_background: true, agentId: 'a1' } as any)
+	await clock.settle()
+	// Neither command is a finished commit, so git was never asked.
+	expect(ran.some(argv => argv[0] === 'git')).toBe(false)
+	await $.tool.call({ tool: 'Bash', command: 'git commit -am x', agentId: 'a1' } as any)
+	await clock.settle()
+	// Checked, but nothing turned clean: no HEAD lookup.
+	expect(ran.some(argv => argv.join(' ').startsWith(`${GIT} /repo status`))).toBe(true)
+	expect(ran.some(argv => argv.includes('HEAD'))).toBe(false)
+	// An agent whose files sit outside any repository is never asked for a status.
+	await $.tool.call(edit('/elsewhere/c.js', 'a2'))
+	await $.tool.call({ tool: 'Bash', command: 'git commit -am y', agentId: 'a2' } as any)
+	await clock.settle()
+	expect(ran.some(argv => argv.join(' ').startsWith(`${GIT} /elsewhere status`))).toBe(false)
+	const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	await pane.press({ key: 'files-a1' })
+	const files = await $.ui.mount({ ...FILES, surface: 'desktop' })
+	expect(await stateOf(files, '/repo/src/a.js')).toBe('edited')
+	expect(await stateOf(files, '/repo/src/dist.js')).toBe('edited')
+	expect(await files.find({ type: 'Text', text: /^committed / })).toBeUndefined()
+	await files.unmount()
+	await pane.unmount()
+})
