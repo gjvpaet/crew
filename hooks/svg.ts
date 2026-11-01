@@ -357,3 +357,64 @@ export function bandBarSvg(input: BandBarSvgInput): string {
 		`<rect class="ahead" y="0" height="${num(height)}" fill="url(#dust)"/>${sweep}</g>${ticks}${pillGroup}</svg>`
 	)
 }
+
+export type ShineOptions = { fontSize?: number; weight?: number }
+
+// A short, stable hash for ids: an inline SVG's <style> and ids are page-wide, so two shines must not share them.
+function shortHash(text: string): string {
+	let h = 2166136261
+	for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619) >>> 0
+	return h.toString(36)
+}
+
+const SHINE = { duration: 1.6, band: 0.4, minBand: 14, tint: '#FFFFFF', peak: 0.75 }
+const SHINE_FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+
+// The live file's name: the name in `color`, and over it a lighter band that sweeps across the letters every 1.6 s.
+// The band is a rect with a transparent-light-transparent gradient, moved by CSS keyframes (no script, so it plays in
+// an interactive Svg's frame) and clipped to the text, so only the letters light up. No text metrics are available
+// here: the width is an estimate from an average glyph, as in the band's pill.
+export function shineSvg(text: string, color: string, opts: ShineOptions = {}): { source: string; width: number; height: number } {
+	const { fontSize = 13, weight = 600 } = opts
+	const width = Math.ceil(text.length * fontSize * 0.62) + 4
+	const height = Math.ceil(fontSize + 6)
+	const id = `shine-${shortHash(`${text}|${fontSize}|${weight}`)}`
+	const band = Math.max(SHINE.minBand, Math.round(width * SHINE.band))
+	const label = escapeXml(text)
+	const textAttrs =
+		`x="2" y="${num(height / 2)}" dominant-baseline="central" font-family="${SHINE_FONT}" ` +
+		`font-size="${num(fontSize)}" font-weight="${weight}"`
+	const style =
+		`.${id}{animation:${id} ${SHINE.duration}s linear infinite}` +
+		`@keyframes ${id}{from{transform:translateX(${-band}px)}to{transform:translateX(${width}px)}}`
+	const defs =
+		`<linearGradient id="${id}-g"><stop offset="0" stop-color="${SHINE.tint}" stop-opacity="0"/>` +
+		`<stop offset="0.5" stop-color="${SHINE.tint}" stop-opacity="${SHINE.peak}"/>` +
+		`<stop offset="1" stop-color="${SHINE.tint}" stop-opacity="0"/></linearGradient>` +
+		`<clipPath id="${id}-c"><text ${textAttrs}>${label}</text></clipPath>`
+	const source =
+		`${svgOpen(width, height)}<style>${style}</style><defs>${defs}</defs>` +
+		`<text ${textAttrs} fill="${color}">${label}</text>` +
+		`<g clip-path="url(#${id}-c)"><rect class="${id}" x="0" y="0" width="${band}" height="${height}" fill="url(#${id}-g)"/></g></svg>`
+	return { source, width, height }
+}
+
+export type CardIcon = 'eye' | 'pencil' | 'check' | 'pause' | 'branch'
+
+// Simple strokes on a 24-unit grid, drawn here for the card: an open eye, a slanted pencil, a tick, two bars and a fork.
+const ICON_GLYPHS: Record<CardIcon, string> = {
+	eye: '<path d="M5.5 12C8 8.2 16 8.2 18.5 12C16 15.8 8 15.8 5.5 12Z"/><circle cx="12" cy="12" r="1.8"/>',
+	pencil: '<path d="M7.5 16.5l.8-3L15 6.8l2.2 2.2l-6.7 6.7z"/><path d="M13.6 8.2l2.2 2.2"/>',
+	check: '<path d="M7.5 12.5l3 3l6-6.5"/>',
+	pause: '<path d="M10 8.5v7M14 8.5v7"/>',
+	branch: '<circle cx="6" cy="5" r="2.2"/><circle cx="6" cy="19" r="2.2"/><circle cx="18" cy="8" r="2.2"/><path d="M6 7.2v9.6M18 10.2c0 3.4-4.2 4.4-10 6.2"/>'
+}
+
+// The state icons sit in a circle tinted with their colour; the branch has none, being a glyph set inline in a row.
+export function iconSvg(icon: CardIcon, color: string, size: number): string {
+	const circle = icon === 'branch' ? '' : `<circle cx="12" cy="12" r="12" fill="${color}" fill-opacity="0.22"/>`
+	return (
+		`<svg xmlns="${XMLNS}" viewBox="0 0 24 24" width="${num(size)}" height="${num(size)}">${circle}` +
+		`<g fill="none" stroke="${color}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${ICON_GLYPHS[icon]}</g></svg>`
+	)
+}

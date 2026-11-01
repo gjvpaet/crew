@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import { PALETTE, spriteCells, spriteGrid, spritePixels } from '../hooks/sprite'
-import { BAND_NATIVE_WIDTH, BAR_NATIVE_WIDTH, bandBarSvg, barSvg, escapeXml, pipHeight, pipSvg, pipWidth } from '../hooks/svg'
+import { BAND_NATIVE_WIDTH, BAR_NATIVE_WIDTH, bandBarSvg, barSvg, escapeXml, iconSvg, pipHeight, pipSvg, pipWidth, shineSvg } from '../hooks/svg'
 
 const rects = (svg: string) => svg.match(/<rect\b[^>]*>/g) ?? []
 const part = (svg: string, name: string) =>
@@ -299,4 +299,80 @@ test('a finished mascot holds a chequered goal flag inside its box; no other pos
 	for (const pose of ['running', 'paused', 'stopped'] as const) {
 		expect(pipSvg('plain', {}, 32, { ...look, pose })).not.toContain('class="flag"')
 	}
+})
+
+test('shineSvg draws the name in its colour with a band sweeping across it on a loop', async () => {
+	const { source, width, height } = shineSvg('PriceTable.jsx', '#F0883E')
+	expect(isWellFormed(source)).toBe(true)
+	expect(source).toContain('@keyframes')
+	expect(source).toContain('infinite')
+	expect(source).toContain('1.6s')
+	expect(source).toContain('fill="#F0883E"')
+	expect(source).toContain('>PriceTable.jsx</text>')
+	expect(source).toContain('font-family="-apple-system, BlinkMacSystemFont, \'Segoe UI\', sans-serif"')
+	expect(source).toContain('font-size="13"')
+	expect(source).toContain('font-weight="600"')
+	// The band is clipped to the letters, so it never lights the gaps around them.
+	expect(source).toMatch(/<clipPath id="[^"]+"><text[^>]*>PriceTable\.jsx<\/text><\/clipPath>/)
+	expect(source).toContain('<linearGradient')
+	expect(source).toContain(`width="${width}" height="${height}"`)
+	expect(width).toBe(Math.ceil('PriceTable.jsx'.length * 13 * 0.62) + 4)
+	expect(height).toBe(19)
+	expect(shineSvg('PriceTable.jsx', '#F0883E').source).toBe(source)
+})
+
+test('shineSvg escapes the name and takes its size from the options', async () => {
+	const { source } = shineSvg('a<b>&.js', '#3FB950')
+	expect(source).toContain('>a&lt;b&gt;&amp;.js</text>')
+	expect(source).not.toContain('a<b>')
+	const big = shineSvg('a.js', '#3FB950', { fontSize: 20, weight: 700 })
+	expect(big.source).toContain('font-size="20"')
+	expect(big.source).toContain('font-weight="700"')
+	expect(big.height).toBe(26)
+})
+
+test('shineSvg grows with the name and stays small', async () => {
+	const short = shineSvg('a.js', '#A371F7')
+	const long = shineSvg('a-much-longer-name.jsx', '#A371F7')
+	expect(long.width).toBeGreaterThan(short.width)
+	for (const { width, height } of [short, long]) {
+		expect(Number.isInteger(width) && width > 0).toBe(true)
+		expect(Number.isInteger(height) && height > 0).toBe(true)
+	}
+	expect(shineSvg('abcdefghij0123456789', '#F0883E').source.length).toBeLessThan(1500)
+})
+
+test('two shines on one page never share an id, class or keyframes', async () => {
+	const names = (source: string) => [
+		...[...source.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]),
+		...[...source.matchAll(/@keyframes ([\w-]+)/g)].map(match => match[1]),
+		...[...source.matchAll(/\.([\w-]+)\s*\{/g)].map(match => match[1])
+	]
+	const first = names(shineSvg('PriceTable.jsx', '#F0883E').source)
+	const second = names(shineSvg('usePrices.js', '#F0883E').source)
+	expect(first.length).toBeGreaterThanOrEqual(4)
+	expect(first.filter(name => second.includes(name))).toEqual([])
+})
+
+test('iconSvg draws a tinted circle with a stroked glyph, one per card state', async () => {
+	for (const icon of ['eye', 'pencil', 'check', 'pause'] as const) {
+		const svg = iconSvg(icon, '#F0883E', 36)
+		expect(isWellFormed(svg)).toBe(true)
+		expect(svg).toContain('width="36" height="36"')
+		expect(svg).toContain('stroke="#F0883E"')
+		// The circle is the colour at about 22%, with nothing else filled.
+		expect(svg).toMatch(/<circle [^>]*fill="#F0883E" fill-opacity="0\.22"/)
+		expect(svg).toContain('fill="none"')
+	}
+	expect(new Set(['eye', 'pencil', 'check', 'pause'].map(icon => iconSvg(icon as 'eye', '#000000', 20))).size).toBe(4)
+	expect(iconSvg('check', '#3FB950', 20)).toContain('width="20" height="20"')
+})
+
+test('the branch icon is the glyph alone, with no circle behind it', async () => {
+	const svg = iconSvg('branch', '#8B949E', 14)
+	expect(isWellFormed(svg)).toBe(true)
+	expect(svg).toContain('width="14" height="14"')
+	expect(svg).toContain('stroke="#8B949E"')
+	expect(svg).not.toContain('fill-opacity')
+	expect(svg).not.toContain('fill="#8B949E"')
 })
