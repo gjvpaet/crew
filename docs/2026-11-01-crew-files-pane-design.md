@@ -79,26 +79,25 @@ Recorded in Crew's existing `tool.call` hook, after `next(e)`, only when the cal
 |---|---|
 | `Read` (`file_path`) | `read`, unless the entry is already `edited` or `committed` |
 | `Edit`, `Write` (`file_path`), `NotebookEdit` (`notebook_path`) | `edited`, including from `committed` |
-| `Bash` whose `command` runs `git commit` and succeeds, not `run_in_background` | the git check below |
+| `Bash` (by any agent) whose `command` runs `git commit` and succeeds, not `run_in_background` | the git check below, over every agent's files |
 
 Grep, Glob and other Bash commands are not tracked.
 
 **Commit detection.** `isGitCommit(command)` is a word-split heuristic that ignores quoting. It is true when some `git` invocation in the command (split on `&&`, `||`, `;`, `|` and newlines), after any leading `NAME=value` words and global options (`-C dir`, `-c k=v`, `--git-dir x`, `--no-pager`, …), has `commit` as its subcommand. `git log --grep commit`, `echo git commit` and `git commit-tree` are false. A false positive only costs one extra check.
 
-**Git check.** After a successful commit command, without holding back the tool result:
+**Git check.** After a successful commit command by any agent, without holding back the tool result, Crew checks the edited files of **every** agent, not only the committer's: Main often commits its sub-agents' work.
 
 1. Note the time, `checkedAt`.
-2. For each distinct folder of the agent's edited files, run `rev-parse --show-cdup` there. Its top is `joinUp(folder, output)`, which keeps the path's own spelling (`/tmp` stays `/tmp`). A folder where it fails (outside any repository, deleted) is skipped. So an agent working in a git worktree or submodule is checked in that worktree, never in the session's checkout.
+2. For each distinct folder of all agents' edited files (each path once), run `rev-parse --show-cdup` there. Its top is `joinUp(folder, output)`, which keeps the path's own spelling (`/tmp` stays `/tmp`). A folder where it fails (outside any repository, deleted) is skipped. So an agent working in a git worktree or submodule is checked in that worktree, never in the session's checkout.
 3. Per top: `status --porcelain -z -- <its edited paths>`. Listed paths are dirty. Of the rest, only those `ls-files -z --full-name` lists count as clean, so a file git never tracked (written then deleted, ignored or untracked) never shows as committed.
 4. Only in a top with clean files: `rev-parse --short HEAD` for the SHA.
-5. If nothing turned clean anywhere, nothing is dispatched: no green files, no SHA. Otherwise dispatch `committed` with `at: checkedAt`. Only entries touched at or before `checkedAt` turn committed, so an edit made while the check ran stays edited.
+5. Each agent with clean files gets its own `committed` event: its clean paths, the SHA of its last clean path's repository, and `at: checkedAt`. An agent with nothing clean gets no event, so no SHA. Only entries touched at or before `checkedAt` turn committed, so an edit made while the check ran stays edited.
 
 Every git call is `git --no-optional-locks -C <dir> …` (so it never takes `index.lock` from under the agent's next git command), through `$.process.run` with a 5 s timeout. Any failure skips that top and leaves its files `edited`.
 
 **Known limits.**
 - A file whose deletion was committed (`git rm x && git commit`) stays `edited`: git no longer tracks it.
-- With clean files in several repositories, the SHA of the last one checked is shown.
-- The check covers the committing agent's own edited files only: when Main commits a sub-agent's edits, the sub-agent's files stay `edited`.
+- With an agent's clean files in several repositories, the SHA of its last clean path's repository is shown.
 
 ## State
 
@@ -139,7 +138,7 @@ A `committed` event that changes nothing returns the same state object.
 | `hooks/files-pane.tsx` (new) | `registerFilesPane(on)`: the `ui.render` hook for `crew-files`, `ui.close` (matched on its id) clearing `filesFor`, `showFiles($, key)` (open, switch or close), the platform check and the safe `openFile`, the live row's pulse |
 | `hooks/view.ts` | `RowView` gains `fileCount` and `isFilesShown`; exports `agentAccent`, `pulseAt`, `GRAPHICAL_REST_ALPHA` |
 | `hooks/panel.tsx` | the chevron button on the card's title row and the line row; pressing it calls `showFiles` |
-| `hooks/register.tsx` | `tool.call` dispatches `touch` events and, for a finished commit, runs `checkCommit` and dispatches `committed`; registers the Files pane. The existing ticker already redraws every `ui.render` hook while an agent runs, so the pulse needs no change |
+| `hooks/register.tsx` | `tool.call` dispatches `touch` events and, for a finished commit by any agent, runs `checkCommit` over every agent's edited files and dispatches one `committed` per agent with clean files; registers the Files pane. The existing ticker already redraws every `ui.render` hook while an agent runs, so the pulse needs no change |
 | `types/index.d.ts` | `FileState`, `FileEntry`, `files`, `lastCommit`, `filesFor` |
 | `scripts/test-one.sh` (new) | runs only the named test files, from a scratch copy of the mod |
 
@@ -189,6 +188,7 @@ Run one test file at a time (`scripts/test-one.sh <file>`).
     - reveal by executable bit, by symlink, and when the check fails.
   - **Commits:**
     - a commit turns only clean, tracked files green and shows the SHA;
+    - Main committing turns a sub-agent's clean files green too, with the SHA in both panes, and leaves another agent's dirty file edited;
     - a worktree is checked in itself;
     - a written-then-deleted file stays edited;
     - no check, a failed check, or nothing clean stamps nothing.
