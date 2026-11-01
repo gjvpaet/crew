@@ -1,4 +1,5 @@
 import type { AgentIdentity, AgentRecord, AgentStatusView, CrewState, TaskItem, Usage } from '../types'
+import { applyCommitted, applyTouch, type Touch } from './files'
 import { contextWindow, estimateUsd } from './pricing'
 import { roleFor } from './roles'
 import { applyTaskCall, taskProgress, type TaskToolCall } from './tasks'
@@ -16,7 +17,9 @@ export const EMPTY_STATE: CrewState = {
 	sessionByModel: {},
 	turnByModel: {},
 	known: {},
-	nextColor: 0
+	nextColor: 0,
+	files: {},
+	lastCommit: {}
 }
 
 export type ApiUsage = {
@@ -37,6 +40,8 @@ export type CrewEvent =
 	| { kind: 'turnEnd'; at: number; agentId?: string; isAborted: boolean; reason: string }
 	| { kind: 'tasks'; agentId?: string; call: TaskToolCall }
 	| { kind: 'statuses'; at: number; list: readonly ListedAgent[] }
+	| { kind: 'touch'; at: number; agentId?: string; path: string; touch: Touch }
+	| { kind: 'committed'; agentId?: string; paths: string[]; sha?: string }
 
 const ENDED = new Set<AgentStatusView>(['completed', 'failed', 'killed', 'stopped'])
 const FAILED = new Set<AgentStatusView>(['failed', 'killed', 'stopped'])
@@ -154,6 +159,9 @@ function startTurn(state: CrewState, ev: Extract<CrewEvent, { kind: 'turnStart' 
 		// An unfinished list is kept for this prompt's updates to build on, but shown only once one arrives.
 		areTasksCarried: !isListDone,
 		agentTasks: Object.fromEntries(Object.entries(state.agentTasks).filter(([id]) => id in carried)),
+		// Files go with their cards: kept for agents still at work, dropped with the rest and with Main's last prompt.
+		files: Object.fromEntries(Object.entries(state.files).filter(([id]) => id in carried)),
+		lastCommit: Object.fromEntries(Object.entries(state.lastCommit).filter(([id]) => id in carried)),
 		turnByModel: {}
 	}
 }
@@ -272,6 +280,21 @@ function applyStatuses(state: CrewState, ev: Extract<CrewEvent, { kind: 'statuse
 	}, state)
 }
 
+function addTouch(state: CrewState, ev: Extract<CrewEvent, { kind: 'touch' }>): CrewState {
+	const key = ev.agentId ?? MAIN
+	return { ...state, files: { ...state.files, [key]: applyTouch(state.files[key] ?? [], ev.path, ev.touch, ev.at) } }
+}
+
+function markCommitted(state: CrewState, ev: Extract<CrewEvent, { kind: 'committed' }>): CrewState {
+	const key = ev.agentId ?? MAIN
+	const list = state.files[key]
+	return {
+		...state,
+		...(list ? { files: { ...state.files, [key]: applyCommitted(list, ev.paths) } } : {}),
+		...(ev.sha ? { lastCommit: { ...state.lastCommit, [key]: ev.sha } } : {})
+	}
+}
+
 export function reduce(state: CrewState, ev: CrewEvent): CrewState {
 	// State saved by an older build may lack keys added since; a current one passes through as itself.
 	const isCurrent = Object.keys(EMPTY_STATE).every(key => key in state)
@@ -291,6 +314,10 @@ export function reduce(state: CrewState, ev: CrewEvent): CrewState {
 			return applyTasks(s, ev)
 		case 'statuses':
 			return applyStatuses(s, ev)
+		case 'touch':
+			return addTouch(s, ev)
+		case 'committed':
+			return markCommitted(s, ev)
 	}
 }
 

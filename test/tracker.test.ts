@@ -413,3 +413,43 @@ test('borders pulse while any agent runs, Main included, and not while they only
 	expect(isTicking(queued)).toBe(true)
 	expect(isPulsing(queued)).toBe(false)
 })
+
+test('touches are filed under their agent, or Main without one', () => {
+	const state = run([
+		...START,
+		{ kind: 'touch', at: 3000, agentId: 'a1', path: '/repo/a.js', touch: 'read' },
+		{ kind: 'touch', at: 3100, agentId: 'a1', path: '/repo/a.js', touch: 'edit' },
+		{ kind: 'touch', at: 3200, path: '/repo/README.md', touch: 'read' }
+	])
+	expect(state.files.a1).toEqual([{ path: '/repo/a.js', state: 'edited', at: 3100 }])
+	expect(state.files[MAIN]).toEqual([{ path: '/repo/README.md', state: 'read', at: 3200 }])
+})
+
+test('a commit marks only the listed files and keeps the SHA', () => {
+	const state = run([
+		...START,
+		{ kind: 'touch', at: 3000, agentId: 'a1', path: '/repo/a.js', touch: 'edit' },
+		{ kind: 'touch', at: 3100, agentId: 'a1', path: '/repo/b.js', touch: 'edit' },
+		{ kind: 'committed', agentId: 'a1', paths: ['/repo/a.js'], sha: 'a1c9e42' }
+	])
+	expect(state.files.a1.map(item => item.state)).toEqual(['committed', 'edited'])
+	expect(state.lastCommit.a1).toBe('a1c9e42')
+	// No SHA and no files: nothing is written.
+	const quiet = run([...START, { kind: 'committed', agentId: 'a2', paths: [] }])
+	expect(quiet.lastCommit).toEqual({})
+	expect(quiet.files).toEqual({})
+})
+
+test('a new prompt keeps the files of agents still at work and drops the rest with their cards', () => {
+	const state = run([
+		...START,
+		{ kind: 'touch', at: 3000, agentId: 'a1', path: '/repo/a.js', touch: 'read' },
+		{ kind: 'touch', at: 3000, agentId: 'a2', path: '/repo/b.js', touch: 'read' },
+		{ kind: 'touch', at: 3000, path: '/repo/c.js', touch: 'read' },
+		{ kind: 'committed', agentId: 'a2', paths: [], sha: 'abc1234' },
+		{ kind: 'turnEnd', at: 4000, agentId: 'a2', isAborted: false, reason: 'answer' },
+		{ kind: 'turnStart', at: 5000, turnId: 't2', text: 'Next thing' }
+	])
+	expect(Object.keys(state.files)).toEqual(['a1'])
+	expect(state.lastCommit).toEqual({})
+})
