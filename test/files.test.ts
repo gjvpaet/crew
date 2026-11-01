@@ -11,6 +11,7 @@ import {
 	isGitCommit,
 	joinUp,
 	latestOf,
+	openCommand,
 	posix,
 	touchOf
 } from '../hooks/files'
@@ -225,4 +226,39 @@ test('a card row carries its file count and whether the Files pane shows it', ()
 	expect(agentAccent(state, 'a1')).toBe(ACCENTS[0])
 	expect(agentAccent(state, 'gone')).toBe(agentAccent(state, 'main'))
 	expect(pulseAt(1000)).toBe(0.55)
+})
+
+test('openCommand opens a document with the platform’s opener and nothing else', () => {
+	expect(openCommand('darwin', '/repo/a.js')).toEqual({ argv: ['open', '/repo/a.js'], isReveal: false })
+	expect(openCommand('linux', '/repo/notes.md')).toEqual({ argv: ['xdg-open', '/repo/notes.md'], isReveal: false })
+	// Never cmd.exe: it would re-read & | ^ and %VAR% inside the name.
+	expect(openCommand('win32', 'C:/repo/a & b.md')).toEqual({ argv: ['explorer', 'C:\\repo\\a & b.md'], isReveal: false })
+})
+
+test('openCommand refuses a path that is not absolute', () => {
+	for (const path of ['', 'a.js', './a.js', '../a.js', '-rf', 'src/a.js']) {
+		expect(openCommand('darwin', path)).toBeNull()
+		expect(openCommand('linux', path)).toBeNull()
+		expect(openCommand('win32', path)).toBeNull()
+	}
+})
+
+test('openCommand reveals what the platform would run instead of showing', () => {
+	expect(openCommand('darwin', '/repo/Deploy.COMMAND')).toEqual({ argv: ['open', '-R', '/repo/Deploy.COMMAND'], isReveal: true })
+	expect(openCommand('darwin', '/Apps/Tool.app')?.isReveal).toBe(true)
+	expect(openCommand('win32', 'C:/repo/setup.exe')).toEqual({ argv: ['explorer', '/select,C:\\repo\\setup.exe'], isReveal: true })
+	expect(openCommand('win32', 'C:/repo/run.PS1')?.isReveal).toBe(true)
+	expect(openCommand('linux', '/repo/bin/run.sh')).toEqual({ argv: ['xdg-open', '/repo/bin'], isReveal: true })
+	expect(openCommand('linux', '/run.sh')).toEqual({ argv: ['xdg-open', '/'], isReveal: true })
+	expect(openCommand('linux', '/home/me/x.AppImage')?.isReveal).toBe(true)
+})
+
+test('openCommand judges the extension per platform', () => {
+	// A script on macOS is shown by open; a .command is not.
+	expect(openCommand('darwin', '/repo/run.sh')?.isReveal).toBe(false)
+	expect(openCommand('linux', '/repo/a.exe')?.isReveal).toBe(false)
+	expect(openCommand('win32', 'C:/repo/a.sh')?.isReveal).toBe(false)
+	// Only the last extension counts, and a name that merely contains one is a document.
+	expect(openCommand('win32', 'C:/repo/a.exe.txt')?.isReveal).toBe(false)
+	expect(openCommand('win32', 'C:/repo/exe')?.isReveal).toBe(false)
 })

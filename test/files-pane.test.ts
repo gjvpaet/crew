@@ -1,5 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
+import { MAX_ROWS, STATE_COLORS } from '../hooks/files-pane'
+
 const PANE = {
 	plugin: 'crew',
 	component: 'Pane',
@@ -177,8 +179,8 @@ test('the Files pane draws a nested tree with merged folders and each file state
 		expect((await files.find({ key: 'open-/repo/src/pricing/PriceTable.jsx' }))?.text).toBe('PriceTable.jsx')
 		const state = (await cells(files, 'file:/repo/src/pricing/PriceTable.jsx'))[3]
 		expect(shown(state)).toBe('edited')
-		expect(state.props.color).toBe('#F0883E')
-		expect((await cells(files, 'file:/repo/src/pricing/usePrices.js'))[3].props.color).toBe('#A371F7')
+		expect(state.props.color).toBe(STATE_COLORS.edited)
+		expect((await cells(files, 'file:/repo/src/pricing/usePrices.js'))[3].props.color).toBe(STATE_COLORS.read)
 		expect((await cells(files, 'out:/outside project'))[1].props.dimColor).toBe(true)
 		// No commit yet: the legend leaves committed out, and there is no footer.
 		expect(await files.find({ type: 'Text', text: /^● committed$/ })).toBeUndefined()
@@ -202,11 +204,11 @@ test('the live file’s dot pulses while its agent runs, and the header sums up 
 	const second = await dotOf('/repo/b.js')
 	expect(first).not.toBe(second)
 	// Only the live file pulses.
-	expect(await dotOf('/repo/a.js')).toBe('#A371F7')
+	expect(await dotOf('/repo/a.js')).toBe(STATE_COLORS.read)
 	await $.turn.complete({ turnId: 'x', agentId: 'a1', answer: '', durationMs: 1, isAborted: false, reason: 'answer' } as any)
 	expect((await files.find({ type: 'Text', text: /^DONE$/ }))?.text).toBe('DONE')
 	expect((await files.find({ type: 'Text', text: /^edited 1, read 1$/ }))?.text).toBe('edited 1, read 1')
-	expect(await dotOf('/repo/b.js')).toBe('#F0883E')
+	expect(await dotOf('/repo/b.js')).toBe(STATE_COLORS.edited)
 	await files.unmount()
 	await pane.unmount()
 })
@@ -218,9 +220,71 @@ test('a long file list stays inside the drawing budget with a count of the rest'
 	expect((await pane.find({ key: 'files-a1' }))?.text).toBe('▸ 200')
 	await pane.press({ key: 'files-a1' })
 	const files = await $.ui.mount({ ...FILES, surface: 'desktop' })
-	// 150 rows: the src/ folder and 149 of its 200 files.
-	expect(await files.findAll({ type: 'Button' })).toHaveLength(149)
-	expect((await files.find({ type: 'Text', text: /more$/ }))?.text).toBe('+ 51 more')
+	// MAX_ROWS rows: the src/ folder and the files after it, up to the cap.
+	expect(await files.findAll({ type: 'Button' })).toHaveLength(MAX_ROWS - 1)
+	expect((await files.find({ type: 'Text', text: /more$/ }))?.text).toBe(`+ ${201 - MAX_ROWS} more`)
+	// What Desktop will draw: under 2,000 nodes and 32 levels deep.
+	const nodes = { count: 0, depth: 0 }
+	const walk = (node: any, depth: number) => {
+		if (!node || typeof node !== 'object') return
+		nodes.count++
+		nodes.depth = Math.max(nodes.depth, depth)
+		for (const child of node.children ?? []) walk(child, depth + 1)
+	}
+	walk(await files.find({}), 1)
+	expect(nodes.count).toBeLessThan(2000)
+	expect(nodes.depth).toBeLessThan(32)
+	await files.unmount()
+	await pane.unmount()
+})
+
+test('the live dot reaches its full colour at the pulse’s peak on both surfaces', async ($, on) => {
+	const { clock } = await start($, on)
+	await $.tool.call(edit('/repo/b.js', 'a1'))
+	const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	await pane.press({ key: 'files-a1' })
+	const hex = STATE_COLORS.edited
+	const rgba = `rgba(${[1, 3, 5].map(at => parseInt(hex.slice(at, at + 2), 16)).join(',')},1)`
+	const desktop = await $.ui.mount({ ...FILES, surface: 'desktop' })
+	const terminal = await $.ui.mount({ ...FILES, surface: 'terminal' })
+	// The clock starts on the peak of the two-second cycle.
+	expect((await cells(desktop, 'file:/repo/b.js'))[1].props.color).toBe(rgba)
+	expect((await cells(terminal, 'file:/repo/b.js'))[1].props.color).toBe(hex)
+	await clock.advance(1000)
+	expect((await cells(desktop, 'file:/repo/b.js'))[1].props.color).not.toBe(rgba)
+	expect((await cells(terminal, 'file:/repo/b.js'))[1].props.color).not.toBe(hex)
+	await desktop.unmount()
+	await terminal.unmount()
+	await pane.unmount()
+})
+
+test('a file the platform would run is shown in its folder, any other opens', async ($, on) => {
+	const { ran, toasts } = await start($, on, { stdout: { 'uname -s': 'Darwin\n' } })
+	await $.tool.call(read('/repo/a.js', 'a1'))
+	await $.tool.call(read('/repo/run.command', 'a1'))
+	const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	await pane.press({ key: 'files-a1' })
+	const files = await $.ui.mount({ ...FILES, surface: 'desktop' })
+	await files.press({ key: 'open-/repo/a.js' })
+	expect(ran.at(-1)).toEqual(['open', '/repo/a.js'])
+	expect(toasts.some(toast => toast.includes('a.js'))).toBe(false)
+	await files.press({ key: 'open-/repo/run.command' })
+	expect(ran.at(-1)).toEqual(['open', '-R', '/repo/run.command'])
+	expect(toasts.some(toast => toast.includes('showed run.command in its folder rather than running it'))).toBe(true)
+	await files.unmount()
+	await pane.unmount()
+})
+
+test('a card dropped by a new prompt leaves the Files pane with its how-to message', async ($, on) => {
+	await start($, on)
+	await $.tool.call(read('/repo/a.js', 'a1'))
+	const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	await pane.press({ key: 'files-a1' })
+	const files = await $.ui.mount({ ...FILES, surface: 'desktop' })
+	expect(await files.find({ type: 'Text', text: /^RIGHT NOW$|^DONE$/ })).toBeDefined()
+	await $.turn.complete({ turnId: 'x', agentId: 'a1', answer: '', durationMs: 1, isAborted: false, reason: 'answer' } as any)
+	await $.turn.start({ text: 'Next', turnId: 't2' })
+	expect((await files.find({ type: 'Text', text: /Press ▸/ }))?.text).toBe('Press ▸ on a card in the Agents pane to see its files.')
 	await files.unmount()
 	await pane.unmount()
 })

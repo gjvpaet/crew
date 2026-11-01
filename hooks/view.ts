@@ -179,7 +179,7 @@ export const pulseAt = (now: number) => ((1 - Math.cos((2 * Math.PI * now) / PUL
 
 // The terminal's border at rest, which the pulse blends from: the graphical surfaces fade the accent in instead.
 const TERMINAL_REST = [0x5f, 0x5e, 0x5a]
-const GRAPHICAL_REST_ALPHA = 0.2
+export const GRAPHICAL_REST_ALPHA = 0.2
 
 export function pulseColor(accent: string, pulse: number, surface: 'graphical' | 'terminal'): string {
 	const channels = [1, 3, 5].map(at => parseInt(accent.slice(at, at + 2), 16))

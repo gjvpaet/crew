@@ -2,9 +2,9 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 
 import type { FileState } from '../types'
-import { fileTree, headline, latestOf, posix, type TreeRow } from './files'
+import { fileTree, headline, latestOf, openCommand, posix, type OpenPlatform, type TreeRow } from './files'
 import { EMPTY_STATE } from './tracker'
-import { agentAccent, pulseAt, pulseColor } from './view'
+import { GRAPHICAL_REST_ALPHA, PULSE, agentAccent, pulseAt, pulseColor } from './view'
 
 export const FILES_PANE = 'crew-files'
 
@@ -18,8 +18,13 @@ export const STATE_COLORS: Record<FileState, string> = { read: '#A371F7', edited
 // Past this many rows the tree stops with a count, keeping the pane well inside what Desktop will draw.
 export const MAX_ROWS = 150
 
-// Added to the card pulse so the live dot never fades past readable; at the pulse's peak it is the full colour.
+// How far into its colour the live dot sits at the pulse's trough, so it never fades past readable.
 const PULSE_FLOOR = 0.25
+
+// The pulse rescaled so its peak is the full colour on either surface: `rest` is what pulseColor already adds
+// (the graphical surfaces fade the accent in from an alpha, the terminal blends from grey).
+const dotBlend = (now: number, surface: 'graphical' | 'terminal') =>
+	PULSE_FLOOR + (pulseAt(now) / PULSE.strength) * (1 - PULSE_FLOOR - (surface === 'graphical' ? GRAPHICAL_REST_ALPHA : 0))
 
 const titleOf = (description: string | undefined) => `Files · ${description ?? 'Agent'}`
 
@@ -40,39 +45,40 @@ export async function showFiles($: EngineInterface, key: string) {
 	$.ui.toast('Crew: the Files pane has no room here')
 }
 
-type Platform = 'darwin' | 'linux' | 'win32'
+let platform: OpenPlatform | null = null
 
-let platform: Promise<Platform> | null = null
-
-// Read once a session: Windows names itself in OS; elsewhere uname tells macOS from Linux.
-function osName($: EngineInterface): Promise<Platform> {
-	platform ??= (async () => {
-		try {
-			if ((await $.env.get('OS')) === 'Windows_NT') return 'win32'
-			const uname = await $.process.run(['uname', '-s'], { timeoutMs: 3_000 })
-			return uname.stdout.trim() === 'Darwin' ? 'darwin' : 'linux'
-		} catch {
-			return 'linux'
-		}
-	})()
-	return platform
-}
-
-const OPENERS: Record<Platform, (path: string) => string[]> = {
-	darwin: path => ['open', path],
-	linux: path => ['xdg-open', path],
-	win32: path => ['cmd', '/c', 'start', '', path]
-}
-
-// A file row opens its file in the default app; a failure is only a toast.
-async function openFile($: EngineInterface, path: string) {
+// Read once per module: Windows names itself in OS; elsewhere uname tells macOS from Linux. Only an answer that was
+// really given is kept; a failed look is Linux for that press and is asked again at the next.
+async function osName($: EngineInterface): Promise<OpenPlatform> {
+	if (platform) return platform
 	try {
-		const ran = await $.process.run(OPENERS[await osName($)](path), { timeoutMs: 5_000 })
-		if (ran.exitCode === 0) return
+		if ((await $.env.get('OS')) === 'Windows_NT') return (platform = 'win32')
+		const uname = await $.process.run(['uname', '-s'], { timeoutMs: 3_000 })
+		if (uname.exitCode === 0) return (platform = uname.stdout.trim() === 'Darwin' ? 'darwin' : 'linux')
 	} catch {
-		// Falls through to the toast.
+		// Falls through to the guess.
 	}
-	$.ui.toast(`Crew: couldn't open ${path.slice(path.lastIndexOf('/') + 1)}`)
+	return 'linux'
+}
+
+// A file row shows its file in the default app, or its folder for a file that app would run; a failure is only a
+// toast.
+async function openFile($: EngineInterface, path: string) {
+	const name = path.slice(path.lastIndexOf('/') + 1)
+	const command = openCommand(await osName($), path)
+	if (command) {
+		try {
+			const ran = await $.process.run(command.argv, { timeoutMs: 5_000 })
+			// explorer exits 1 even when it showed the file.
+			if (command.argv[0] === 'explorer' || ran.exitCode === 0) {
+				if (command.isReveal) $.ui.toast(`Crew: showed ${name} in its folder rather than running it`)
+				return
+			}
+		} catch {
+			// Falls through to the toast.
+		}
+	}
+	$.ui.toast(`Crew: couldn't open ${name}`)
 }
 
 export function registerFilesPane(on: On) {
@@ -87,14 +93,15 @@ export function registerFilesPane(on: On) {
 	on('ui.render', { component: 'Pane', requestId: FILES_PANE }, async ($, e) => {
 		const { Box, Button, Text } = $.ui.resolve(e)
 		const key = await read($, filesFor)
-		if (!key) {
+		const state = await read($, model)
+		// A card dropped by a new prompt leaves the pane showing nothing to open.
+		if (!key || !state.agents[key]) {
 			return (
 				<Box>
 					<Text dimColor>Press ▸ on a card in the Agents pane to see its files.</Text>
 				</Box>
 			)
 		}
-		const state = await read($, model)
 		// `?.`: a model saved before files were tracked has neither until its next event.
 		const entries = state.files?.[key] ?? []
 		const sha = state.lastCommit?.[key]
@@ -110,15 +117,15 @@ export function registerFilesPane(on: On) {
 			: ['read', 'edited']
 
 		const dotColor = (path: string, fileState: FileState) =>
-			path === live ? pulseColor(STATE_COLORS[fileState], PULSE_FLOOR + pulseAt(now), surface) : STATE_COLORS[fileState]
+			path === live ? pulseColor(STATE_COLORS[fileState], dotBlend(now, surface), surface) : STATE_COLORS[fileState]
 
 		const treeRow = (row: TreeRow) => (
 			<Box key={row.key} flexDirection="row" gap={1}>
-				<Text key={`guide-${row.key}`} dimColor mono>
+				<Text dimColor mono>
 					{row.prefix}
 				</Text>
 				{row.kind === 'dir' ? (
-					<Text key={`name-${row.key}`} {...(row.isOutside ? { dimColor: true } : {})} wrap="truncate-end">
+					<Text {...(row.isOutside ? { dimColor: true } : {})} wrap="truncate-end">
 						{row.name}
 					</Text>
 				) : (
@@ -150,11 +157,11 @@ export function registerFilesPane(on: On) {
 					<Text weight="semibold" wrap="truncate-end">
 						{head.line}
 					</Text>
-					{head.where && (
+					{head.where ? (
 						<Text dimColor wrap="truncate-end">
 							{`in ${head.where}`}
 						</Text>
-					)}
+					) : null}
 					<Box flexDirection="row" gap={2}>
 						{legend.map(fileState => (
 							<Text key={`legend-${fileState}`} color={STATE_COLORS[fileState]}>
@@ -164,13 +171,13 @@ export function registerFilesPane(on: On) {
 					</Box>
 				</Box>
 				{entries.length > 0 && (
-					<Text key="touched" dimColor size="caption">
+					<Text dimColor size="caption">
 						{`TOUCHED · ${entries.length} FILE${entries.length === 1 ? '' : 'S'}`}
 					</Text>
 				)}
 				{rows.slice(0, MAX_ROWS).map(treeRow)}
 				{rows.length > MAX_ROWS && (
-					<Text key="more" dimColor>
+					<Text dimColor>
 						{`+ ${rows.length - MAX_ROWS} more`}
 					</Text>
 				)}
