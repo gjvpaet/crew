@@ -157,16 +157,16 @@ test('the headline names the live file while the agent runs and sums the files o
 		entry('/repo/c.js', 'committed', 3),
 		entry('/repo/src/d.js', 'read', 4)
 	]
-	expect(headline(list, true, '/repo')).toEqual({ label: 'RIGHT NOW', line: 'Reading d.js', where: 'src' })
-	expect(headline([entry('/repo/x.js', 'edited', 1)], true, '/repo')).toEqual({ label: 'RIGHT NOW', line: 'Editing x.js', where: '' })
-	expect(headline([entry('/elsewhere/y.md', 'read', 1)], true, '/repo')).toEqual({
+	expect(headline(list, 'running', '/repo')).toEqual({ label: 'RIGHT NOW', line: 'Reading d.js', where: 'src' })
+	expect(headline([entry('/repo/x.js', 'edited', 1)], 'running', '/repo')).toEqual({ label: 'RIGHT NOW', line: 'Editing x.js', where: '' })
+	expect(headline([entry('/elsewhere/y.md', 'read', 1)], 'running', '/repo')).toEqual({
 		label: 'RIGHT NOW',
 		line: 'Reading y.md',
 		where: '/elsewhere'
 	})
-	expect(headline(list, false, '/repo')).toEqual({ label: 'DONE', line: 'edited 1, committed 1, read 2', where: '' })
-	expect(headline([], false, '/repo').line).toBe('No files yet.')
-	expect(headline([], true, '/repo').line).toBe('No files yet.')
+	expect(headline(list, 'completed', '/repo')).toEqual({ label: 'DONE', line: 'edited 1, committed 1, read 2', where: '' })
+	expect(headline([], 'completed', '/repo').line).toBe('No files yet.')
+	expect(headline([], 'running', '/repo').line).toBe('No files yet.')
 })
 
 test('a project folder named like the outside branch keeps its own keys', () => {
@@ -195,16 +195,16 @@ test('empty path segments are ignored inside and outside the project', () => {
 test('the tree and headline read a root of / or one with a trailing slash', () => {
 	const list = [entry('/repo/src/a.js', 'read')]
 	expect(fileTree(list, '/repo/')).toEqual(fileTree(list, '/repo'))
-	expect(headline(list, true, '/repo/')).toEqual(headline(list, true, '/repo'))
+	expect(headline(list, 'running', '/repo/')).toEqual(headline(list, 'running', '/repo'))
 	expect(fileTree(list, '/').map(row => [row.name, row.kind])).toEqual([
 		['repo/src/', 'dir'],
 		['a.js', 'file']
 	])
-	expect(headline(list, true, '/')).toEqual({ label: 'RIGHT NOW', line: 'Reading a.js', where: 'repo/src' })
+	expect(headline(list, 'running', '/')).toEqual({ label: 'RIGHT NOW', line: 'Reading a.js', where: 'repo/src' })
 })
 
 test('a file directly under / outside the project keeps / as its folder', () => {
-	expect(headline([entry('/notes.md', 'read')], true, '/repo')).toEqual({
+	expect(headline([entry('/notes.md', 'read')], 'running', '/repo')).toEqual({
 		label: 'RIGHT NOW',
 		line: 'Reading notes.md',
 		where: '/'

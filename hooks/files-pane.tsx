@@ -6,7 +6,7 @@ import { fileTree, headline, latestOf, openCommand, posix, type OpenPlatform, ty
 import { EMPTY_STATE } from './tracker'
 import { GRAPHICAL_REST_ALPHA, PULSE, agentAccent, pulseAt, pulseColor } from './view'
 
-export const FILES_PANE = 'crew-files'
+const FILES_PANE = 'crew-files'
 
 // The engine's scan follows state refs only through consts of the same file, so each file declares its own.
 const model = atom({ plugin: 'crew', key: 'model' } as const, EMPTY_STATE)
@@ -119,12 +119,12 @@ export function registerFilesPane(on: On) {
 		// `?.`: a model saved before files were tracked has neither until its next event.
 		const entries = state.files?.[key] ?? []
 		const sha = state.lastCommit?.[key]
-		const isRunning = state.agents[key]?.status === 'running'
+		const status = state.agents[key].status
 		const root = posix(await $.session.cwd())
 		const now = await $.clock.now()
-		const head = headline(entries, isRunning, root)
+		const head = headline(entries, status, root)
 		const rows = fileTree(entries, root)
-		const live = isRunning ? latestOf(entries)?.path : undefined
+		const live = status === 'running' ? latestOf(entries)?.path : undefined
 		const surface = e.surface === 'terminal' ? 'terminal' : 'graphical'
 		const legend: FileState[] = entries.some(item => item.state === 'committed')
 			? ['read', 'edited', 'committed']
@@ -144,14 +144,14 @@ export function registerFilesPane(on: On) {
 					</Text>
 				) : (
 					[
-						<Text key={`dot-${row.path}`} color={dotColor(row.path, row.state)}>
+						<Text key="dot" color={dotColor(row.path, row.state)}>
 							●
 						</Text>,
 						// width 0 + flexGrow 1: the name takes what the dot and the state word leave.
-						<Box key={`cell-${row.path}`} flexGrow={1} width={0}>
+						<Box key="cell" flexGrow={1} width={0}>
 							<Button key={`open-${row.path}`} plain label={row.name} onPress={() => openFile($, row.path)} />
 						</Box>,
-						<Text key={`state-${row.path}`} color={STATE_COLORS[row.state]}>
+						<Text key="state" color={STATE_COLORS[row.state]}>
 							{row.state}
 						</Text>
 					]

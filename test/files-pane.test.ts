@@ -216,6 +216,23 @@ test('the live file’s dot pulses while its agent runs, and the header sums up 
 	await pane.unmount()
 })
 
+// Copied from test/ui.test.ts: Desktop drops a whole drawing at 2,000 nodes, 32 levels or 262,144 characters, so each
+// element and each text child counts as a node and every string in props or children toward the characters.
+function desktopMeasure(node: any, depth = 1): { nodes: number; chars: number; depth: number } {
+	if (typeof node === 'string') return { nodes: 1, chars: node.length, depth }
+	const own = Object.values(node?.props ?? {}).reduce(
+		(sum: number, value: any) => sum + (typeof value === 'string' ? value.length : String(value ?? '').length),
+		0
+	)
+	return (node?.children ?? []).reduce(
+		(sum: any, child: any) => {
+			const inner = desktopMeasure(child, depth + 1)
+			return { nodes: sum.nodes + inner.nodes, chars: sum.chars + inner.chars, depth: Math.max(sum.depth, inner.depth) }
+		},
+		{ nodes: 1, chars: own, depth }
+	)
+}
+
 test('a long file list stays inside the drawing budget with a count of the rest', async ($, on) => {
 	await start($, on)
 	for (let i = 0; i < 300; i++) await $.tool.call(read(`/repo/src/f${String(i).padStart(3, '0')}.js`, 'a1'))
@@ -226,17 +243,11 @@ test('a long file list stays inside the drawing budget with a count of the rest'
 	// MAX_ROWS rows: the src/ folder and the files after it, up to the cap.
 	expect(await files.findAll({ type: 'Button' })).toHaveLength(MAX_ROWS - 1)
 	expect((await files.find({ type: 'Text', text: /more$/ }))?.text).toBe(`+ ${201 - MAX_ROWS} more`)
-	// What Desktop will draw: under 2,000 nodes and 32 levels deep.
-	const nodes = { count: 0, depth: 0 }
-	const walk = (node: any, depth: number) => {
-		if (!node || typeof node !== 'object') return
-		nodes.count++
-		nodes.depth = Math.max(nodes.depth, depth)
-		for (const child of node.children ?? []) walk(child, depth + 1)
-	}
-	walk(await files.find({}), 1)
-	expect(nodes.count).toBeLessThan(2000)
-	expect(nodes.depth).toBeLessThan(32)
+	// What Desktop will draw: under 2,000 nodes, 32 levels and 262,144 characters.
+	const measured = desktopMeasure(await files.drawn())
+	expect(measured.nodes).toBeLessThan(2000)
+	expect(measured.depth).toBeLessThan(32)
+	expect(measured.chars).toBeLessThan(262_144)
 	await files.unmount()
 	await pane.unmount()
 })
@@ -388,8 +399,6 @@ test('a successful git commit turns the clean edited files green and shows the S
 		'status',
 		'--porcelain',
 		'-z',
-		'--ignored',
-		'--untracked-files=all',
 		'--',
 		'/repo/src/pricing/PriceTable.jsx',
 		'/repo/test/PriceTable.test.jsx'

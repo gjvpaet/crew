@@ -1,4 +1,4 @@
-import type { FileEntry, FileState } from '../types'
+import type { AgentStatusView, FileEntry, FileState } from '../types'
 
 // Past this many files an agent's list drops its oldest reads first, then its oldest files of any kind.
 export const MAX_FILES = 200
@@ -91,22 +91,25 @@ export function dirtyPaths(porcelainZ: string): Set<string> {
 const isInside = (root: string, path: string) => root !== '' && path.startsWith(root.endsWith('/') ? root : `${root}/`)
 const relativeTo = (root: string, path: string) => path.slice(root.replace(/\/$/, '').length + 1)
 const basename = (path: string) => path.slice(path.lastIndexOf('/') + 1)
-const dirname = (path: string) => {
+export const dirname = (path: string) => {
 	const at = path.lastIndexOf('/')
 	return at < 0 ? '' : at === 0 ? '/' : path.slice(0, at)
 }
 
-export type Headline = { label: 'RIGHT NOW' | 'DONE'; line: string; where: string }
+export type Headline = { label: 'RIGHT NOW' | 'WAITING' | 'DONE'; line: string; where: string }
 
 const VERBS: Record<FileState, string> = { read: 'Reading', edited: 'Editing', committed: 'Committed' }
 
-// While the agent runs: what it touched last and where. Once it has ended: how many files of each kind.
-export function headline(entries: readonly FileEntry[], isRunning: boolean, root: string): Headline {
-	if (isRunning) {
+// While the agent runs, or waits (pending, waiting, idle) for what comes next: what it touched last and where. Once
+// it has ended (completed, failed, killed, stopped): how many files of each kind.
+export function headline(entries: readonly FileEntry[], status: AgentStatusView, root: string): Headline {
+	const isEnded = status === 'completed' || status === 'failed' || status === 'killed' || status === 'stopped'
+	if (!isEnded) {
+		const label = status === 'running' ? 'RIGHT NOW' : 'WAITING'
 		const live = latestOf(entries)
-		if (!live) return { label: 'RIGHT NOW', line: 'No files yet.', where: '' }
+		if (!live) return { label, line: 'No files yet.', where: '' }
 		const shown = isInside(root, live.path) ? relativeTo(root, live.path) : live.path
-		return { label: 'RIGHT NOW', line: `${VERBS[live.state]} ${basename(shown)}`, where: dirname(shown) }
+		return { label, line: `${VERBS[live.state]} ${basename(shown)}`, where: dirname(shown) }
 	}
 	const counts = (['edited', 'committed', 'read'] as const)
 		.map(state => [state, entries.filter(item => item.state === state).length] as const)
@@ -209,9 +212,10 @@ const RUNNABLE: Record<OpenPlatform, Set<string>> = {
 // The command that shows a file from a row press, or null for a path that is not absolute (or that Windows could
 // not be asked about safely). A file the platform would run, by extension or because its executable bit is set, or
 // a symlink, which the opener treats as its target's type, is revealed in its folder instead (`isExecutable` says
-// the macOS or Linux check found either), so a press can never start a program. Windows goes through explorer, never cmd.exe, which would re-read & | ^ and
-// %VAR% in a file name; it opens folders rather than `/select,`, which breaks on spaces and commas once spawned,
-// and it splits an unquoted argument at commas, so a path holding one is shown by its folder, or not at all.
+// the macOS or Linux check found either), so a press can never start a program. Windows goes through explorer,
+// never cmd.exe, which would re-read & | ^ and %VAR% in a file name; it opens folders rather than `/select,`, which
+// breaks on spaces and commas once spawned, and it splits an unquoted argument at commas, so a path holding one is
+// shown by its folder, or not at all.
 export function openCommand(
 	platform: OpenPlatform,
 	path: string,

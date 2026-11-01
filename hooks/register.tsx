@@ -3,7 +3,7 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { AgentStatusView, MascotPrefs } from '../types'
 import { registerBand } from './band'
-import { dirtyPaths, isGitCommit, joinUp, posix, touchOf } from './files'
+import { dirname, dirtyPaths, isGitCommit, joinUp, posix, touchOf } from './files'
 import { registerFilesPane } from './files-pane'
 import { SET_MASCOT_SPEC, SET_MASCOT_TOOL, applyMascotChange, parseMascotInput, sanitizeMascots } from './mascot'
 import { isMoving, openPane, registerPanel, syncPaneShown } from './panel'
@@ -108,12 +108,10 @@ async function recordFiles($: EngineInterface, tool: string, input: Record<strin
 
 const GIT_MS = 5_000
 
-const dirnameOf = (path: string) => path.slice(0, path.lastIndexOf('/')) || '/'
-
 // Which of the agent's edited files git now holds clean: those turn committed, with the commit's short SHA. Each file
 // is asked in its own repository, since an agent in a git worktree works outside the checkout the session started in.
-// --no-optional-locks keeps these reads from taking index.lock under the agent's next git command. Ignored and
-// untracked files are listed too (`!!`, `??`), so a file git never tracks is not mistaken for a committed one.
+// --no-optional-locks keeps these reads from taking index.lock under the agent's next git command. `ls-files` is what
+// keeps untracked, ignored and deleted files from counting as committed: status lists none of them as dirty.
 async function checkCommit($: EngineInterface, agentId: string | undefined) {
 	const checkedAt = await $.clock.now()
 	const files = (await read($, model)).files?.[agentId ?? MAIN] ?? []
@@ -122,18 +120,18 @@ async function checkCommit($: EngineInterface, agentId: string | undefined) {
 	const git = (dir: string, ...args: string[]) =>
 		$.process.run(['git', '--no-optional-locks', '-C', dir, ...args], { timeoutMs: GIT_MS })
 	const tops = new Map<string, string[]>()
-	for (const dir of new Set(edited.map(dirnameOf))) {
+	for (const dir of new Set(edited.map(dirname))) {
 		const up = await git(dir, 'rev-parse', '--show-cdup').catch(() => null)
 		// Not in a repository, or a directory since deleted: those files are left as they are.
 		if (!up || up.exitCode !== 0) continue
 		const top = joinUp(dir, up.stdout.trim())
-		tops.set(top, [...(tops.get(top) ?? []), ...edited.filter(path => dirnameOf(path) === dir)])
+		tops.set(top, [...(tops.get(top) ?? []), ...edited.filter(path => dirname(path) === dir)])
 	}
 	const committed: string[] = []
 	let sha: string | undefined
 	for (const [top, paths] of tops) {
 		try {
-			const status = await git(top, 'status', '--porcelain', '-z', '--ignored', '--untracked-files=all', '--', ...paths)
+			const status = await git(top, 'status', '--porcelain', '-z', '--', ...paths)
 			if (status.exitCode !== 0) continue
 			const dirty = new Set([...dirtyPaths(status.stdout)].map(path => `${top}/${path}`))
 			const unlisted = paths.filter(path => !dirty.has(path))
