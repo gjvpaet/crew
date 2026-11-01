@@ -316,7 +316,7 @@ test('shineSvg draws the name in its colour with a band sweeping across it on a 
 	expect(source).toMatch(/<clipPath id="[^"]+"><text[^>]*>PriceTable\.jsx<\/text><\/clipPath>/)
 	expect(source).toContain('<linearGradient')
 	expect(source).toContain(`width="${width}" height="${height}"`)
-	expect(width).toBe(Math.ceil('PriceTable.jsx'.length * 13 * 0.62) + 4)
+	expect(width).toBe(Math.ceil('PriceTable.jsx'.length * 13 * 0.58) + 4)
 	expect(height).toBe(19)
 	expect(shineSvg('PriceTable.jsx', '#F0883E').source).toBe(source)
 })

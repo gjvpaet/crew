@@ -131,26 +131,7 @@ export const dirname = (path: string) => {
 const isEndedStatus = (status: AgentStatusView) =>
 	status === 'completed' || status === 'failed' || status === 'killed' || status === 'stopped'
 
-export type Headline = { label: 'RIGHT NOW' | 'WAITING' | 'DONE'; line: string; where: string }
-
 const VERBS: Record<FileState, string> = { read: 'Reading', edited: 'Editing', committed: 'Committed' }
-
-// While the agent runs, or waits (pending, waiting, idle) for what comes next: what it touched last and where. Once
-// it has ended (completed, failed, killed, stopped): how many files of each kind.
-export function headline(entries: readonly FileEntry[], status: AgentStatusView, root: string): Headline {
-	if (!isEndedStatus(status)) {
-		const label = status === 'running' ? 'RIGHT NOW' : 'WAITING'
-		const live = latestOf(entries)
-		if (!live) return { label, line: 'No files yet.', where: '' }
-		const shown = shownPath(root, live.path)
-		return { label, line: `${VERBS[live.state]} ${basename(shown)}`, where: dirname(shown) }
-	}
-	const counts = (['edited', 'committed', 'read'] as const)
-		.map(state => [state, entries.filter(item => item.state === state).length] as const)
-		.filter(([, count]) => count > 0)
-		.map(([state, count]) => `${state} ${count}`)
-	return { label: 'DONE', line: counts.length > 0 ? counts.join(', ') : 'No files yet.', where: '' }
-}
 
 export type ChipTone = 'code' | 'docs' | 'data' | 'other'
 
@@ -242,7 +223,7 @@ const ICON_OF: Record<FileState, RightNow['icon']> = { read: 'eye', edited: 'pen
 const DONE_VERB: Record<FileState, string> = { read: 'Read', edited: 'Edited', committed: 'Committed' }
 
 // '+12 −3'; a side that is 0 is left out, and so is the whole of it when both are.
-const countsText = (added: number, removed: number) =>
+export const countsText = (added: number, removed: number) =>
 	[added > 0 ? `+${added}` : '', removed > 0 ? `\u2212${removed}` : ''].filter(Boolean).join(' ')
 
 // What the Right-now card shows: the live file while the agent runs or waits, a summary once it has ended.
@@ -329,81 +310,6 @@ export function numstat(stdout: string): Record<string, [number, number]> {
 		if (path !== '') found[path] = [toCount(token.slice(0, first)), toCount(token.slice(first + 1, second))]
 	}
 	return found
-}
-
-export type TreeRow =
-	| { kind: 'dir'; key: string; prefix: string; name: string; isOutside?: true }
-	| { kind: 'file'; key: string; prefix: string; name: string; path: string; state: FileState }
-
-type Node = { name: string; dirs: Map<string, Node>; files: FileEntry[]; isOutside: boolean }
-
-const newNode = (name: string, isOutside: boolean): Node => ({ name, dirs: new Map(), files: [], isOutside })
-
-function place(top: Node, segments: string[], item: FileEntry) {
-	let node = top
-	for (const segment of segments.slice(0, -1)) {
-		let next = node.dirs.get(segment)
-		if (!next) {
-			next = newNode(segment, node.isOutside)
-			node.dirs.set(segment, next)
-		}
-		node = next
-	}
-	node.files.push(item)
-}
-
-// A folder holding nothing but one folder merges with it into one row: `src/pricing/`.
-function merged(node: Node): { name: string; node: Node } {
-	let name = node.name
-	let at = node
-	while (at.files.length === 0 && at.dirs.size === 1) {
-		const [only] = at.dirs.values()
-		name = `${name}/${only.name}`
-		at = only
-	}
-	return { name, node: at }
-}
-
-// Non-breaking, so a surface that trims spaces still keeps the tree's indent.
-const NB = '\u00a0'
-
-// The agent's files as tree rows, relative to the project folder: folders then files, each by name, with files
-// outside the project under a last `outside project/` branch. `prefix` holds the guide lines to draw before the row.
-export function fileTree(entries: readonly FileEntry[], root: string): TreeRow[] {
-	const top = newNode('', false)
-	const outside = newNode('outside project', true)
-	for (const item of entries) {
-		if (isInside(root, item.path)) place(top, relativeTo(root, item.path).split('/').filter(Boolean), item)
-		else place(outside, item.path.split('/').filter(Boolean), item)
-	}
-	const hasOutside = outside.files.length > 0 || outside.dirs.size > 0
-	const rows: TreeRow[] = []
-	const walk = (node: Node, guides: string, keyPath: string) => {
-		const dirs = [...node.dirs.values()].sort((a, b) => a.name.localeCompare(b.name))
-		const files = [...node.files].sort((a, b) => basename(a.path).localeCompare(basename(b.path)))
-		// Folders, then files, then (at the top only) the outside branch, so it always comes last.
-		const children: Array<{ dir: Node } | { file: FileEntry }> = [
-			...dirs.map(dir => ({ dir })),
-			...files.map(file => ({ file })),
-			...(node === top && hasOutside ? [{ dir: outside }] : [])
-		]
-		children.forEach((child, index) => {
-			const isLast = index === children.length - 1
-			const prefix = `${guides}${isLast ? '└' : '├'}`
-			if ('file' in child) {
-				const { path, state } = child.file
-				rows.push({ kind: 'file', key: `file:${path}`, prefix, name: basename(path), path, state })
-				return
-			}
-			// The outside branch keeps its own name: merging it into the folders under it would hide what it is.
-			const { name, node: inner } = child.dir === outside ? { name: outside.name, node: outside } : merged(child.dir)
-			const path = `${keyPath}/${name}`
-			rows.push({ kind: 'dir', key: `${child.dir.isOutside ? 'out' : 'dir'}:${path}`, prefix, name: `${name}/`, ...(child.dir.isOutside ? { isOutside: true as const } : {}) })
-			walk(inner, `${guides}${isLast ? NB : '│'}${NB}`, path)
-		})
-	}
-	walk(top, '', '')
-	return rows
 }
 
 export type OpenPlatform = 'darwin' | 'linux' | 'win32'

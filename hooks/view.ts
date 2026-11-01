@@ -162,12 +162,6 @@ function accentOf(agent: AgentRecord, state: CrewState): string {
 	return ACCENTS[slotOf(agent, state) % ACCENTS.length]
 }
 
-// The colour of an agent's card by its key, Main's blue for one no longer listed.
-export const agentAccent = (state: CrewState, id: string) => {
-	const agent = state.agents[id]
-	return agent ? accentOf(agent, state) : PALETTE.body
-}
-
 // The same slot as the colour, so a species and its colour travel together and neighbours never look alike.
 const speciesOf = (agent: AgentRecord, state: CrewState): Species =>
 	agent.id === MAIN ? 'pip' : SPECIES_ORDER[slotOf(agent, state) % SPECIES_ORDER.length]
@@ -175,11 +169,11 @@ const speciesOf = (agent: AgentRecord, state: CrewState): Species =>
 // A running card's border breathes: a two-second cycle, at its peak a little over halfway from rest to the accent.
 export const PULSE = { cycleMs: 2000, strength: 0.55 }
 
-export const pulseAt = (now: number) => ((1 - Math.cos((2 * Math.PI * now) / PULSE.cycleMs)) / 2) * PULSE.strength
+const pulseAt = (now: number) => ((1 - Math.cos((2 * Math.PI * now) / PULSE.cycleMs)) / 2) * PULSE.strength
 
 // The terminal's border at rest, which the pulse blends from: the graphical surfaces fade the accent in instead.
 const TERMINAL_REST = [0x5f, 0x5e, 0x5a]
-export const GRAPHICAL_REST_ALPHA = 0.2
+const GRAPHICAL_REST_ALPHA = 0.2
 
 export function pulseColor(accent: string, pulse: number, surface: 'graphical' | 'terminal'): string {
 	const channels = [1, 3, 5].map(at => parseInt(accent.slice(at, at + 2), 16))

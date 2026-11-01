@@ -376,7 +376,7 @@ const SHINE_FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
 // here: the width is an estimate from an average glyph, as in the band's pill.
 export function shineSvg(text: string, color: string, opts: ShineOptions = {}): { source: string; width: number; height: number } {
 	const { fontSize = 13, weight = 600 } = opts
-	const width = Math.ceil(text.length * fontSize * 0.62) + 4
+	const width = Math.ceil(text.length * fontSize * 0.58) + 4
 	const height = Math.ceil(fontSize + 6)
 	const id = `shine-${shortHash(`${text}|${fontSize}|${weight}`)}`
 	const band = Math.max(SHINE.minBand, Math.round(width * SHINE.band))

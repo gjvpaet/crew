@@ -9,8 +9,6 @@ import {
 	cdTarget,
 	changedFiles,
 	dirtyPaths,
-	fileTree,
-	headline,
 	isGitCommit,
 	joinUp,
 	latestOf,
@@ -24,9 +22,8 @@ import {
 	chipOf
 } from '../hooks/files'
 import { EMPTY_STATE, reduce, type CrewEvent } from '../hooks/tracker'
-import { agentAccent, panelView, pulseAt, ACCENTS } from '../hooks/view'
+import { panelView } from '../hooks/view'
 
-const NB = '\u00a0'
 const entry = (path: string, state: FileEntry['state'], at = 1): FileEntry => ({ path, state, at })
 
 test('a read adds a file as read and never takes one back from edited or committed', () => {
@@ -122,101 +119,10 @@ test('a rename or copy in either status column skips its old name', () => {
 	expect([...dirtyPaths('C  copy.js\0orig.js\0')]).toEqual(['copy.js'])
 })
 
-test('the tree merges single-folder chains, lists folders before files and puts outside files last', () => {
-	const rows = fileTree(
-		[
-			entry('/repo/src/pricing/usePrices.js', 'read'),
-			entry('/repo/README.md', 'read'),
-			entry('/repo/src/pricing/PriceTable.jsx', 'edited'),
-			entry('/repo/test/PriceTable.test.jsx', 'committed'),
-			entry('/Users/me/notes.md', 'read')
-		],
-		'/repo'
-	)
-	expect(rows.map(row => [row.prefix, row.name, row.kind === 'file' ? row.state : 'dir'])).toEqual([
-		['├', 'src/pricing/', 'dir'],
-		[`│${NB}├`, 'PriceTable.jsx', 'edited'],
-		[`│${NB}└`, 'usePrices.js', 'read'],
-		['├', 'test/', 'dir'],
-		[`│${NB}└`, 'PriceTable.test.jsx', 'committed'],
-		['├', 'README.md', 'read'],
-		['└', 'outside project/', 'dir'],
-		[`${NB}${NB}└`, 'Users/me/', 'dir'],
-		[`${NB}${NB}${NB}${NB}└`, 'notes.md', 'read']
-	])
-	expect(rows[1]).toEqual({
-		kind: 'file',
-		key: 'file:/repo/src/pricing/PriceTable.jsx',
-		prefix: `│${NB}├`,
-		name: 'PriceTable.jsx',
-		path: '/repo/src/pricing/PriceTable.jsx',
-		state: 'edited'
-	})
-	expect(rows[0]).toEqual({ kind: 'dir', key: 'dir:/src/pricing', prefix: '├', name: 'src/pricing/' })
-	expect(rows[6]).toEqual({ kind: 'dir', key: 'out:/outside project', prefix: '└', name: 'outside project/', isOutside: true })
-	expect(rows[7]).toMatchObject({ key: 'out:/outside project/Users/me', isOutside: true })
-	expect(fileTree([], '/repo')).toEqual([])
-})
-
-test('the headline names the live file while the agent runs and sums the files once it is done', () => {
-	const list = [
-		entry('/repo/src/a.js', 'edited', 1),
-		entry('/repo/b.js', 'read', 2),
-		entry('/repo/c.js', 'committed', 3),
-		entry('/repo/src/d.js', 'read', 4)
-	]
-	expect(headline(list, 'running', '/repo')).toEqual({ label: 'RIGHT NOW', line: 'Reading d.js', where: 'src' })
-	expect(headline([entry('/repo/x.js', 'edited', 1)], 'running', '/repo')).toEqual({ label: 'RIGHT NOW', line: 'Editing x.js', where: '' })
-	expect(headline([entry('/elsewhere/y.md', 'read', 1)], 'running', '/repo')).toEqual({
-		label: 'RIGHT NOW',
-		line: 'Reading y.md',
-		where: '/elsewhere'
-	})
-	expect(headline(list, 'completed', '/repo')).toEqual({ label: 'DONE', line: 'edited 1, committed 1, read 2', where: '' })
-	expect(headline([], 'completed', '/repo').line).toBe('No files yet.')
-	expect(headline([], 'running', '/repo').line).toBe('No files yet.')
-})
-
-test('a project folder named like the outside branch keeps its own keys', () => {
-	const rows = fileTree([entry('/repo/outside project/a.js', 'read'), entry('/tmp/b.js', 'read')], '/repo')
-	expect(rows.map(row => row.key)).toEqual([
-		'dir:/outside project',
-		'file:/repo/outside project/a.js',
-		'out:/outside project',
-		'out:/outside project/tmp',
-		'file:/tmp/b.js'
-	])
-	expect(new Set(rows.map(row => row.key)).size).toBe(rows.length)
-})
-
-test('empty path segments are ignored inside and outside the project', () => {
-	const rows = fileTree([entry('/repo/src//a.js', 'read'), entry('/x//y/b.js', 'read')], '/repo')
-	expect(rows.map(row => [row.kind, row.name])).toEqual([
-		['dir', 'src/'],
-		['file', 'a.js'],
-		['dir', 'outside project/'],
-		['dir', 'x/y/'],
-		['file', 'b.js']
-	])
-})
-
-test('the tree and headline read a root of / or one with a trailing slash', () => {
+test('right now reads a root with a trailing slash or of /', () => {
 	const list = [entry('/repo/src/a.js', 'read')]
-	expect(fileTree(list, '/repo/')).toEqual(fileTree(list, '/repo'))
-	expect(headline(list, 'running', '/repo/')).toEqual(headline(list, 'running', '/repo'))
-	expect(fileTree(list, '/').map(row => [row.name, row.kind])).toEqual([
-		['repo/src/', 'dir'],
-		['a.js', 'file']
-	])
-	expect(headline(list, 'running', '/')).toEqual({ label: 'RIGHT NOW', line: 'Reading a.js', where: 'repo/src' })
-})
-
-test('a file directly under / outside the project keeps / as its folder', () => {
-	expect(headline([entry('/notes.md', 'read')], 'running', '/repo')).toEqual({
-		label: 'RIGHT NOW',
-		line: 'Reading notes.md',
-		where: '/'
-	})
+	expect(rightNow(list, 'running', '/repo/', {}, {})).toEqual(rightNow(list, 'running', '/repo', {}, {}))
+	expect(rightNow(list, 'running', '/', {}, {})).toMatchObject({ title: 'Reading a.js', subtitle: 'repo/src' })
 })
 
 test('a card row carries its file count and whether the Files pane shows it', () => {
@@ -231,9 +137,6 @@ test('a card row carries its file count and whether the Files pane shows it', ()
 	expect(shown.groups[0].rows[0]).toMatchObject({ fileCount: 2, isFilesShown: true })
 	expect(shown.main).toMatchObject({ fileCount: 0, isFilesShown: false })
 	expect(panelView(state, {}, 3000, 20, {}).groups[0].rows[0].isFilesShown).toBe(false)
-	expect(agentAccent(state, 'a1')).toBe(ACCENTS[0])
-	expect(agentAccent(state, 'gone')).toBe(agentAccent(state, 'main'))
-	expect(pulseAt(1000)).toBe(0.55)
 })
 
 test('openCommand opens a document with the platform’s opener and nothing else', () => {
