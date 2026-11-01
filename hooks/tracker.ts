@@ -287,10 +287,13 @@ function addTouch(state: CrewState, ev: Extract<CrewEvent, { kind: 'touch' }>): 
 
 function markCommitted(state: CrewState, ev: Extract<CrewEvent, { kind: 'committed' }>): CrewState {
 	const key = ev.agentId ?? MAIN
-	const list = state.files[key]
+	const list = state.files[key] ?? []
+	const marked = applyCommitted(list, ev.paths)
+	const isMarked = marked.some((item, index) => item !== list[index])
+	if (!isMarked && !ev.sha) return state
 	return {
 		...state,
-		...(list ? { files: { ...state.files, [key]: applyCommitted(list, ev.paths) } } : {}),
+		...(isMarked ? { files: { ...state.files, [key]: marked } } : {}),
 		...(ev.sha ? { lastCommit: { ...state.lastCommit, [key]: ev.sha } } : {})
 	}
 }

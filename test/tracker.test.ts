@@ -434,9 +434,11 @@ test('a commit marks only the listed files and keeps the SHA', () => {
 	])
 	expect(state.files.a1.map(item => item.state)).toEqual(['committed', 'edited'])
 	expect(state.lastCommit.a1).toBe('a1c9e42')
+	// A later commit without a SHA leaves the kept one alone.
+	expect(reduce(state, { kind: 'committed', agentId: 'a1', paths: [] }).lastCommit.a1).toBe('a1c9e42')
 	// No SHA and no files: nothing is written.
 	const quiet = run([...START, { kind: 'committed', agentId: 'a2', paths: [] }])
-	expect(quiet.lastCommit).toEqual({})
+	expect(Object.keys(quiet.lastCommit)).toEqual([])
 	expect(quiet.files).toEqual({})
 })
 
@@ -446,10 +448,54 @@ test('a new prompt keeps the files of agents still at work and drops the rest wi
 		{ kind: 'touch', at: 3000, agentId: 'a1', path: '/repo/a.js', touch: 'read' },
 		{ kind: 'touch', at: 3000, agentId: 'a2', path: '/repo/b.js', touch: 'read' },
 		{ kind: 'touch', at: 3000, path: '/repo/c.js', touch: 'read' },
+		{ kind: 'committed', agentId: 'a1', paths: [], sha: 'a1c9e42' },
 		{ kind: 'committed', agentId: 'a2', paths: [], sha: 'abc1234' },
 		{ kind: 'turnEnd', at: 4000, agentId: 'a2', isAborted: false, reason: 'answer' },
 		{ kind: 'turnStart', at: 5000, turnId: 't2', text: 'Next thing' }
 	])
 	expect(Object.keys(state.files)).toEqual(['a1'])
-	expect(state.lastCommit).toEqual({})
+	expect(state.lastCommit).toEqual({ a1: 'a1c9e42' })
+})
+
+test('a commit that changes nothing returns the same state', () => {
+	const state = run([...START, { kind: 'touch', at: 3000, agentId: 'a1', path: '/repo/a.js', touch: 'edit' }])
+	// No files for the agent and no SHA.
+	expect(reduce(state, { kind: 'committed', agentId: 'a2', paths: ['/repo/a.js'] })).toBe(state)
+	// Paths that match no edited entry, and no SHA.
+	expect(reduce(state, { kind: 'committed', agentId: 'a1', paths: ['/repo/other.js'] })).toBe(state)
+	// A SHA alone keeps the files list as it is.
+	const stamped = reduce(state, { kind: 'committed', agentId: 'a1', paths: ['/repo/other.js'], sha: 'a1c9e42' })
+	expect(stamped.files).toBe(state.files)
+	expect(stamped.lastCommit.a1).toBe('a1c9e42')
+})
+
+test('touches and commits work on state saved before files existed', () => {
+	const old = { turn: null, agents: {}, order: [], tasks: [], agentTasks: {}, sessionByModel: {} } as any
+	const touched = reduce(old, { kind: 'touch', at: 1000, agentId: 'a1', path: '/repo/a.js', touch: 'edit' })
+	expect(touched.files.a1).toEqual([{ path: '/repo/a.js', state: 'edited', at: 1000 }])
+	const committed = reduce(old, { kind: 'committed', agentId: 'a1', paths: [], sha: 'a1c9e42' })
+	expect(committed.lastCommit).toEqual({ a1: 'a1c9e42' })
+	expect(committed.files).toEqual({})
+})
+
+test("Main's files survive a turn no person started", () => {
+	const state = run([
+		...START,
+		{ kind: 'touch', at: 3000, path: '/repo/c.js', touch: 'read' },
+		{ kind: 'turnStart', at: 4000, turnId: 't2', text: '', isPerson: false }
+	])
+	expect(state.files[MAIN]).toEqual([{ path: '/repo/c.js', state: 'read', at: 3000 }])
+})
+
+test("an ended sub-agent's files and SHA survive its resume", () => {
+	const state = run([
+		...START,
+		{ kind: 'touch', at: 3000, agentId: 'a1', path: '/repo/a.js', touch: 'edit' },
+		{ kind: 'committed', agentId: 'a1', paths: ['/repo/a.js'], sha: 'a1c9e42' },
+		{ kind: 'turnEnd', at: 4000, agentId: 'a1', isAborted: false, reason: 'answer' },
+		{ kind: 'turnStart', at: 5000, turnId: 't1', text: '', agentId: 'a1' }
+	])
+	expect(state.agents.a1.status).toBe('running')
+	expect(state.files.a1).toEqual([{ path: '/repo/a.js', state: 'committed', at: 3000 }])
+	expect(state.lastCommit.a1).toBe('a1c9e42')
 })
