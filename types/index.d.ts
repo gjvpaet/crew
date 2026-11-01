@@ -22,6 +22,11 @@ export type Steps = { done: number; total: number; current?: string }
 
 export type TaskItem = { id: string; title: string; status: 'pending' | 'in_progress' | 'completed' }
 
+export type FileState = 'read' | 'edited' | 'committed'
+
+// A file an agent touched, by absolute POSIX path; `at` is its latest touch.
+export type FileEntry = { path: string; state: FileState; at: number }
+
 export type AgentRecord = {
 	id: string
 	description: string
@@ -70,6 +75,10 @@ export type CrewState = {
 	known: Record<string, AgentIdentity>
 	// The colour index the next new sub-agent takes.
 	nextColor: number
+	// The files each agent read and edited, keyed like agentTasks: an agent id, or 'main'.
+	files: Record<string, FileEntry[]>
+	// The short SHA of each agent's latest commit, same keys.
+	lastCommit: Record<string, string>
 }
 
 declare module 'claude-code' {
@@ -80,6 +89,8 @@ declare module 'claude-code' {
 			// Whether a surface draws the Agents pane: the band offers it back while it is not.
 			isPaneShown: boolean
 			groupOpen: Record<string, boolean>
+			// The agent whose files the Files pane shows, or null with none chosen.
+			filesFor: string | null
 			mascots: MascotPrefs
 			hasAutoOpened: boolean
 		}
