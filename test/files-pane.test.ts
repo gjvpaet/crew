@@ -26,6 +26,8 @@ type Options = {
 	failing?: string
 	// A Bash call whose command contains this fails, as a script that exits non-zero does.
 	failingCommand?: string
+	// A Bash call whose command contains this comes back marked read-only by the engine, as `ls` does.
+	readOnlyCommand?: string
 	// A `process.run` whose joined argv starts with this throws, as a command that cannot start does.
 	throwing?: string
 	// Whether `ui.open` finds room for a pane; true when left out.
@@ -76,7 +78,9 @@ async function start($: any, on: any, options: Options = {}) {
 		(options.failing && String(e.file_path ?? '').includes(options.failing)) ||
 		(options.failingCommand && String(e.command ?? '').includes(options.failingCommand))
 			? { result: 'File does not exist.', isError: true }
-			: { result: {} }
+			: options.readOnlyCommand && String(e.command ?? '').includes(options.readOnlyCommand)
+				? { result: {}, isReadOnly: true }
+				: { result: {} }
 	)
 	on('agent.spawn', (_: unknown, e: any) => ({
 		model: 'claude-opus-5-5',
@@ -788,5 +792,20 @@ test('the cap counts what is left once the ignored files are gone', async ($, on
 	await clock.settle()
 	const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
 	expect((await pane.find({ key: 'files-a1' }))?.text).toBe('▸ 100')
+	await pane.unmount()
+})
+
+test('a command the engine marks read-only is not scanned, and its marker is removed', async ($, on) => {
+	const { clock, ran } = await start($, on, {
+		readOnlyCommand: 'ls',
+		stdout: { mktemp: `${MARK}\n`, [`${GIT} /repo rev-parse --show-cdup`]: '\n', 'find /repo': found('/repo/a.ts') }
+	})
+	await $.tool.call(bash('ls -la', 'a1'))
+	await clock.settle()
+	expect(ran).toContainEqual(['mktemp', '-t', 'crew-mark.XXXXXX'])
+	expect(ran.some(argv => argv[0] === 'find')).toBe(false)
+	expect(ran).toContainEqual(['rm', '-f', MARK])
+	const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	expect(await pane.find({ key: 'files-a1' })).toBeUndefined()
 	await pane.unmount()
 })

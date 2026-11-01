@@ -376,12 +376,14 @@ export const register: Register = on => {
 			await recordFiles($, tool, input, e.agentId)
 		}
 		if (isForeground) {
-			// Even a failed command is scanned: a script that fails may have written files first. Only a successful
-			// commit is checked. A denied call ran nothing, so its marker is just removed.
+			// Even a failed command is scanned: a script that fails may have written files first. A command the engine
+			// calls read-only (`ls`, `git status`) wrote nothing, and a denied one never ran: their marker is just removed.
+			// Only a successful commit is checked.
 			const isRun = ran.deny === undefined
+			const isScanned = isRun && ran.isReadOnly !== true
 			const isCommit = isRun && ran.isError !== true && isGitCommit(command)
-			void afterBash($, command, e.agentId, isRun ? marker : undefined, isCommit).catch(() => undefined)
-			if (!isRun && marker) void dropMarker($, marker)
+			void afterBash($, command, e.agentId, isScanned ? marker : undefined, isCommit).catch(() => undefined)
+			if (!isScanned && marker) void dropMarker($, marker)
 		}
 		return ran
 	}).catch(($, e, next) => next(e)) // a Crew failure never fails a tool call
