@@ -61,11 +61,24 @@ async function osName($: EngineInterface): Promise<OpenPlatform> {
 	return 'linux'
 }
 
+// An opener on macOS or Linux runs a file whose executable bit is set, whatever it is called. A check that cannot
+// run counts as executable: the file is shown in its folder rather than risked.
+async function isExecutable($: EngineInterface, path: string) {
+	try {
+		return (await $.process.run(['test', '-x', path], { timeoutMs: 3_000 })).exitCode === 0
+	} catch {
+		return true
+	}
+}
+
 // A file row shows its file in the default app, or its folder for a file that app would run; a failure is only a
 // toast.
 async function openFile($: EngineInterface, path: string) {
 	const name = path.slice(path.lastIndexOf('/') + 1)
-	const command = openCommand(await osName($), path)
+	const os = await osName($)
+	// Windows runs by extension alone, which openCommand judges; the first call only tells a path it refuses.
+	const plain = openCommand(os, path, false)
+	const command = plain && os !== 'win32' && (await isExecutable($, path)) ? openCommand(os, path, true) : plain
 	if (command) {
 		try {
 			const ran = await $.process.run(command.argv, { timeoutMs: 5_000 })

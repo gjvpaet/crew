@@ -24,6 +24,8 @@ type Options = {
 	exits?: Record<string, number>
 	// A tool call on a path containing this fails, as Read does on a missing file.
 	failing?: string
+	// A `process.run` whose joined argv starts with this throws, as a command that cannot start does.
+	throwing?: string
 	// Whether `ui.open` finds room for a pane; true when left out.
 	isPlaced?: boolean
 }
@@ -57,6 +59,7 @@ async function start($: any, on: any, options: Options = {}) {
 	on('process.run', (_: unknown, e: any) => {
 		const argv: string[] = [...e.argv]
 		ran.push(argv)
+		if (options.throwing && argv.join(' ').startsWith(options.throwing)) throw new Error('could not start')
 		const stdout = String(answer(options.stdout, argv) ?? '')
 		const exitCode = Number(answer(options.exits, argv) ?? 0)
 		return { value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
@@ -258,19 +261,46 @@ test('the live dot reaches its full colour at the pulse’s peak on both surface
 	await pane.unmount()
 })
 
-test('a file the platform would run is shown in its folder, any other opens', async ($, on) => {
-	const { ran, toasts } = await start($, on, { stdout: { 'uname -s': 'Darwin\n' } })
-	await $.tool.call(read('/repo/a.js', 'a1'))
-	await $.tool.call(read('/repo/run.command', 'a1'))
+// A normal open on macOS asks `test -x` first; every file but gradlew answers no.
+const DARWIN = { stdout: { 'uname -s': 'Darwin\n' }, exits: { 'test -x /repo/gradlew': 0, 'test -x': 1 } }
+
+async function openRow($: any, on: any, options: Options, paths: string[]) {
+	const run = await start($, on, { ...DARWIN, ...options })
+	for (const path of paths) await $.tool.call(read(path, 'a1'))
 	const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
 	await pane.press({ key: 'files-a1' })
 	const files = await $.ui.mount({ ...FILES, surface: 'desktop' })
+	return { ...run, files, pane }
+}
+
+test('a file the platform would run is shown in its folder, any other opens', async ($, on) => {
+	const { ran, toasts, files, pane } = await openRow($, on, {}, ['/repo/a.js', '/repo/run.command'])
 	await files.press({ key: 'open-/repo/a.js' })
 	expect(ran.at(-1)).toEqual(['open', '/repo/a.js'])
 	expect(toasts.some(toast => toast.includes('a.js'))).toBe(false)
 	await files.press({ key: 'open-/repo/run.command' })
 	expect(ran.at(-1)).toEqual(['open', '-R', '/repo/run.command'])
 	expect(toasts.some(toast => toast.includes('showed run.command in its folder rather than running it'))).toBe(true)
+	await files.unmount()
+	await pane.unmount()
+})
+
+test('an executable file is shown in its folder whatever its name', async ($, on) => {
+	const { ran, toasts, files, pane } = await openRow($, on, {}, ['/repo/gradlew', '/repo/a.js'])
+	await files.press({ key: 'open-/repo/gradlew' })
+	expect(ran).toContainEqual(['test', '-x', '/repo/gradlew'])
+	expect(ran.at(-1)).toEqual(['open', '-R', '/repo/gradlew'])
+	expect(toasts.some(toast => toast.includes('showed gradlew in its folder rather than running it'))).toBe(true)
+	await files.press({ key: 'open-/repo/a.js' })
+	expect(ran.at(-1)).toEqual(['open', '/repo/a.js'])
+	await files.unmount()
+	await pane.unmount()
+})
+
+test('a file whose executable check cannot run is treated as executable', async ($, on) => {
+	const { ran, files, pane } = await openRow($, on, { throwing: 'test -x' }, ['/repo/a.js'])
+	await files.press({ key: 'open-/repo/a.js' })
+	expect(ran.at(-1)).toEqual(['open', '-R', '/repo/a.js'])
 	await files.unmount()
 	await pane.unmount()
 })

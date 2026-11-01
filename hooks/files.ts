@@ -192,26 +192,41 @@ export function fileTree(entries: readonly FileEntry[], root: string): TreeRow[]
 
 export type OpenPlatform = 'darwin' | 'linux' | 'win32'
 
-// What each platform's opener would run rather than show.
+// What each platform's opener would run rather than show; lower-case, compared without regard to case.
 const RUNNABLE: Record<OpenPlatform, Set<string>> = {
-	darwin: new Set(['.app', '.command', '.tool', '.terminal', '.workflow', '.action', '.pkg', '.mpkg']),
+	darwin: new Set([
+		'.app', '.command', '.tool', '.terminal', '.workflow', '.action', '.pkg', '.mpkg', '.jar', '.fileloc', '.inetloc',
+		'.prefpane'
+	]),
 	win32: new Set([
 		'.exe', '.com', '.bat', '.cmd', '.ps1', '.vbs', '.vbe', '.js', '.jse', '.wsf', '.wsh', '.hta', '.msi', '.scr',
-		'.lnk', '.py', '.pyw', '.cpl', '.jar'
+		'.lnk', '.py', '.pyw', '.cpl', '.jar', '.pif', '.msp', '.application', '.appref-ms', '.url', '.scf', '.msc',
+		'.chm', '.reg', '.wsc', '.ws', '.settingcontent-ms', '.appx', '.msix'
 	]),
-	linux: new Set(['.desktop', '.appimage', '.run', '.sh'])
+	linux: new Set(['.desktop', '.appimage', '.run', '.sh', '.jar'])
 }
 
-// The command that shows a file from a row press, or null for a path that is not absolute. A file the platform
-// would run is revealed in its folder instead, so a press can never start a program. Windows goes through explorer,
-// never cmd.exe, which would re-read & | ^ and %VAR% in a file name.
-export function openCommand(platform: OpenPlatform, path: string): { argv: string[]; isReveal: boolean } | null {
+// The command that shows a file from a row press, or null for a path that is not absolute (or that Windows could
+// not be asked about safely). A file the platform would run, by extension or because its executable bit is set
+// (`isExecutable`, which macOS and Linux openers would run whatever the name), is revealed in its folder instead,
+// so a press can never start a program. Windows goes through explorer, never cmd.exe, which would re-read & | ^ and
+// %VAR% in a file name; it opens folders rather than `/select,`, which breaks on spaces and commas once spawned,
+// and it splits an unquoted argument at commas, so a path holding one is shown by its folder, or not at all.
+export function openCommand(
+	platform: OpenPlatform,
+	path: string,
+	isExecutable: boolean
+): { argv: string[]; isReveal: boolean } | null {
 	if (!path.startsWith('/') && !/^[A-Za-z]:\//.test(path)) return null
-	const name = basename(path)
+	// Windows ignores trailing dots and spaces, so `setup.exe.` is setup.exe.
+	const name = platform === 'win32' ? basename(path).replace(/[. ]+$/, '') : basename(path)
 	const dot = name.lastIndexOf('.')
-	const isReveal = dot >= 0 && RUNNABLE[platform].has(name.slice(dot).toLowerCase())
+	const isReveal = isExecutable || (dot >= 0 && RUNNABLE[platform].has(name.slice(dot).toLowerCase()))
 	if (platform === 'darwin') return { argv: isReveal ? ['open', '-R', path] : ['open', path], isReveal }
 	if (platform === 'linux') return { argv: ['xdg-open', isReveal ? dirname(path) : path], isReveal }
 	const win = path.replace(/\//g, '\\')
-	return { argv: ['explorer', isReveal ? `/select,${win}` : win], isReveal }
+	if (!isReveal && !win.includes(',')) return { argv: ['explorer', win], isReveal: false }
+	// A drive's own folder keeps its backslash: `C:` alone is the drive's current folder.
+	const folder = dirname(path).replace(/^([A-Za-z]:)$/, '$1/').replace(/\//g, '\\')
+	return folder.includes(',') ? null : { argv: ['explorer', folder], isReveal: true }
 }

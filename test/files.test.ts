@@ -229,36 +229,72 @@ test('a card row carries its file count and whether the Files pane shows it', ()
 })
 
 test('openCommand opens a document with the platform’s opener and nothing else', () => {
-	expect(openCommand('darwin', '/repo/a.js')).toEqual({ argv: ['open', '/repo/a.js'], isReveal: false })
-	expect(openCommand('linux', '/repo/notes.md')).toEqual({ argv: ['xdg-open', '/repo/notes.md'], isReveal: false })
+	expect(openCommand('darwin', '/repo/a.js', false)).toEqual({ argv: ['open', '/repo/a.js'], isReveal: false })
+	expect(openCommand('linux', '/repo/notes.md', false)).toEqual({ argv: ['xdg-open', '/repo/notes.md'], isReveal: false })
 	// Never cmd.exe: it would re-read & | ^ and %VAR% inside the name.
-	expect(openCommand('win32', 'C:/repo/a & b.md')).toEqual({ argv: ['explorer', 'C:\\repo\\a & b.md'], isReveal: false })
+	expect(openCommand('win32', 'C:/repo/a & b.md', false)).toEqual({ argv: ['explorer', 'C:\\repo\\a & b.md'], isReveal: false })
 })
 
 test('openCommand refuses a path that is not absolute', () => {
 	for (const path of ['', 'a.js', './a.js', '../a.js', '-rf', 'src/a.js']) {
-		expect(openCommand('darwin', path)).toBeNull()
-		expect(openCommand('linux', path)).toBeNull()
-		expect(openCommand('win32', path)).toBeNull()
+		expect(openCommand('darwin', path, false)).toBeNull()
+		expect(openCommand('linux', path, false)).toBeNull()
+		expect(openCommand('win32', path, false)).toBeNull()
 	}
 })
 
 test('openCommand reveals what the platform would run instead of showing', () => {
-	expect(openCommand('darwin', '/repo/Deploy.COMMAND')).toEqual({ argv: ['open', '-R', '/repo/Deploy.COMMAND'], isReveal: true })
-	expect(openCommand('darwin', '/Apps/Tool.app')?.isReveal).toBe(true)
-	expect(openCommand('win32', 'C:/repo/setup.exe')).toEqual({ argv: ['explorer', '/select,C:\\repo\\setup.exe'], isReveal: true })
-	expect(openCommand('win32', 'C:/repo/run.PS1')?.isReveal).toBe(true)
-	expect(openCommand('linux', '/repo/bin/run.sh')).toEqual({ argv: ['xdg-open', '/repo/bin'], isReveal: true })
-	expect(openCommand('linux', '/run.sh')).toEqual({ argv: ['xdg-open', '/'], isReveal: true })
-	expect(openCommand('linux', '/home/me/x.AppImage')?.isReveal).toBe(true)
+	expect(openCommand('darwin', '/repo/Deploy.COMMAND', false)).toEqual({ argv: ['open', '-R', '/repo/Deploy.COMMAND'], isReveal: true })
+	expect(openCommand('darwin', '/Apps/Tool.app', false)?.isReveal).toBe(true)
+	// Windows reveals by opening the folder: explorer's /select, breaks on spaces and commas once spawned.
+	expect(openCommand('win32', 'C:/repo/my tools/setup.exe', false)).toEqual({ argv: ['explorer', 'C:\\repo\\my tools'], isReveal: true })
+	expect(openCommand('win32', 'C:/setup.exe', false)).toEqual({ argv: ['explorer', 'C:\\'], isReveal: true })
+	expect(openCommand('win32', 'C:/repo/run.PS1', false)?.isReveal).toBe(true)
+	expect(openCommand('linux', '/repo/bin/run.sh', false)).toEqual({ argv: ['xdg-open', '/repo/bin'], isReveal: true })
+	expect(openCommand('linux', '/run.sh', false)).toEqual({ argv: ['xdg-open', '/'], isReveal: true })
+	expect(openCommand('linux', '/home/me/x.AppImage', false)?.isReveal).toBe(true)
 })
 
 test('openCommand judges the extension per platform', () => {
 	// A script on macOS is shown by open; a .command is not.
-	expect(openCommand('darwin', '/repo/run.sh')?.isReveal).toBe(false)
-	expect(openCommand('linux', '/repo/a.exe')?.isReveal).toBe(false)
-	expect(openCommand('win32', 'C:/repo/a.sh')?.isReveal).toBe(false)
+	expect(openCommand('darwin', '/repo/run.sh', false)?.isReveal).toBe(false)
+	expect(openCommand('linux', '/repo/a.exe', false)?.isReveal).toBe(false)
+	expect(openCommand('win32', 'C:/repo/a.sh', false)?.isReveal).toBe(false)
 	// Only the last extension counts, and a name that merely contains one is a document.
-	expect(openCommand('win32', 'C:/repo/a.exe.txt')?.isReveal).toBe(false)
-	expect(openCommand('win32', 'C:/repo/exe')?.isReveal).toBe(false)
+	expect(openCommand('win32', 'C:/repo/a.exe.txt', false)?.isReveal).toBe(false)
+	expect(openCommand('win32', 'C:/repo/exe', false)?.isReveal).toBe(false)
+})
+
+test('openCommand reveals anything executable, whatever its extension', () => {
+	expect(openCommand('darwin', '/repo/gradlew', true)).toEqual({ argv: ['open', '-R', '/repo/gradlew'], isReveal: true })
+	expect(openCommand('darwin', '/repo/.git/hooks/pre-commit', true)?.isReveal).toBe(true)
+	expect(openCommand('linux', '/repo/bin/rails', true)).toEqual({ argv: ['xdg-open', '/repo/bin'], isReveal: true })
+	expect(openCommand('linux', '/repo/notes.md', true)?.isReveal).toBe(true)
+	// Not executable and no runnable extension: opened.
+	expect(openCommand('darwin', '/repo/gradlew', false)?.isReveal).toBe(false)
+})
+
+test('openCommand never opens a Windows path explorer would split at a comma', () => {
+	// A comma in the name: the folder is shown instead.
+	expect(openCommand('win32', 'C:/repo/a,b.md', false)).toEqual({ argv: ['explorer', 'C:\\repo'], isReveal: true })
+	// A comma in the folder too: nothing safe is left to run.
+	expect(openCommand('win32', 'C:/re,po/a,b.md', false)).toBeNull()
+	expect(openCommand('win32', 'C:/re,po/setup.exe', false)).toBeNull()
+})
+
+test('openCommand ignores the trailing dots and spaces Windows ignores', () => {
+	expect(openCommand('win32', 'C:/repo/setup.exe.', false)?.isReveal).toBe(true)
+	expect(openCommand('win32', 'C:/repo/setup.exe ', false)?.isReveal).toBe(true)
+	expect(openCommand('win32', 'C:/repo/setup.exe. . ', false)?.isReveal).toBe(true)
+	expect(openCommand('win32', 'C:/repo/notes.md.', false)?.isReveal).toBe(false)
+	// Elsewhere a trailing dot is part of the name.
+	expect(openCommand('darwin', '/repo/run.command.', false)?.isReveal).toBe(false)
+})
+
+test('openCommand knows the other launchers', () => {
+	for (const name of ['a.pif', 'a.msp', 'a.application', 'a.appref-ms', 'a.URL', 'a.scf', 'a.msc', 'a.chm', 'a.reg', 'a.wsc', 'a.ws', 'a.settingcontent-ms', 'a.appx', 'a.msix', 'a.jar']) {
+		expect(openCommand('win32', `C:/repo/${name}`, false)?.isReveal).toBe(true)
+	}
+	for (const name of ['a.jar', 'a.fileloc', 'a.inetloc', 'a.prefpane']) expect(openCommand('darwin', `/repo/${name}`, false)?.isReveal).toBe(true)
+	expect(openCommand('linux', '/repo/a.jar', false)?.isReveal).toBe(true)
 })
