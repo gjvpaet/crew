@@ -207,9 +207,9 @@ const RUNNABLE: Record<OpenPlatform, Set<string>> = {
 }
 
 // The command that shows a file from a row press, or null for a path that is not absolute (or that Windows could
-// not be asked about safely). A file the platform would run, by extension or because its executable bit is set
-// (`isExecutable`, which macOS and Linux openers would run whatever the name), is revealed in its folder instead,
-// so a press can never start a program. Windows goes through explorer, never cmd.exe, which would re-read & | ^ and
+// not be asked about safely). A file the platform would run, by extension or because its executable bit is set, or
+// a symlink, which the opener treats as its target's type, is revealed in its folder instead (`isExecutable` says
+// the macOS or Linux check found either), so a press can never start a program. Windows goes through explorer, never cmd.exe, which would re-read & | ^ and
 // %VAR% in a file name; it opens folders rather than `/select,`, which breaks on spaces and commas once spawned,
 // and it splits an unquoted argument at commas, so a path holding one is shown by its folder, or not at all.
 export function openCommand(

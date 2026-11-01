@@ -61,11 +61,12 @@ async function osName($: EngineInterface): Promise<OpenPlatform> {
 	return 'linux'
 }
 
-// An opener on macOS or Linux runs a file whose executable bit is set, whatever it is called. A check that cannot
-// run counts as executable: the file is shown in its folder rather than risked.
-async function isExecutable($: EngineInterface, path: string) {
+// An opener on macOS or Linux runs a file whose executable bit is set, whatever it is called, and opens a symlink as
+// its target's type (`README.md -> x.terminal` runs the profile). `-L` looks at the last path component only, which
+// is the link itself. A check that cannot run counts as a yes: the file is shown in its folder rather than risked.
+async function wouldRunOrIsLink($: EngineInterface, path: string) {
 	try {
-		return (await $.process.run(['test', '-x', path], { timeoutMs: 3_000 })).exitCode === 0
+		return (await $.process.run(['test', '-x', path, '-o', '-L', path], { timeoutMs: 3_000 })).exitCode === 0
 	} catch {
 		return true
 	}
@@ -78,7 +79,7 @@ async function openFile($: EngineInterface, path: string) {
 	const os = await osName($)
 	// Windows runs by extension alone, which openCommand judges; the first call only tells a path it refuses.
 	const plain = openCommand(os, path, false)
-	const command = plain && os !== 'win32' && (await isExecutable($, path)) ? openCommand(os, path, true) : plain
+	const command = plain && os !== 'win32' && (await wouldRunOrIsLink($, path)) ? openCommand(os, path, true) : plain
 	if (command) {
 		try {
 			const ran = await $.process.run(command.argv, { timeoutMs: 5_000 })

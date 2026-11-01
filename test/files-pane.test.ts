@@ -261,7 +261,7 @@ test('the live dot reaches its full colour at the pulse’s peak on both surface
 	await pane.unmount()
 })
 
-// A normal open on macOS asks `test -x` first; every file but gradlew answers no.
+// A normal open on macOS asks `test -x <path> -o -L <path>` first; every file but gradlew answers no.
 const DARWIN = { stdout: { 'uname -s': 'Darwin\n' }, exits: { 'test -x /repo/gradlew': 0, 'test -x': 1 } }
 
 async function openRow($: any, on: any, options: Options, paths: string[]) {
@@ -288,9 +288,22 @@ test('a file the platform would run is shown in its folder, any other opens', as
 test('an executable file is shown in its folder whatever its name', async ($, on) => {
 	const { ran, toasts, files, pane } = await openRow($, on, {}, ['/repo/gradlew', '/repo/a.js'])
 	await files.press({ key: 'open-/repo/gradlew' })
-	expect(ran).toContainEqual(['test', '-x', '/repo/gradlew'])
+	expect(ran).toContainEqual(['test', '-x', '/repo/gradlew', '-o', '-L', '/repo/gradlew'])
 	expect(ran.at(-1)).toEqual(['open', '-R', '/repo/gradlew'])
 	expect(toasts.some(toast => toast.includes('showed gradlew in its folder rather than running it'))).toBe(true)
+	await files.press({ key: 'open-/repo/a.js' })
+	expect(ran.at(-1)).toEqual(['open', '/repo/a.js'])
+	await files.unmount()
+	await pane.unmount()
+})
+
+test('a symlink is shown in its folder, since opening it opens its target', async ($, on) => {
+	const link = '/repo/README.md'
+	const exits = { [`test -x ${link} -o -L ${link}`]: 0, 'test -x': 1 }
+	const { ran, toasts, files, pane } = await openRow($, on, { exits }, [link, '/repo/a.js'])
+	await files.press({ key: `open-${link}` })
+	expect(ran.at(-1)).toEqual(['open', '-R', link])
+	expect(toasts.some(toast => toast.includes('showed README.md in its folder rather than running it'))).toBe(true)
 	await files.press({ key: 'open-/repo/a.js' })
 	expect(ran.at(-1)).toEqual(['open', '/repo/a.js'])
 	await files.unmount()
