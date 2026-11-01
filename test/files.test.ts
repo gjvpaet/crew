@@ -44,6 +44,14 @@ test('past the cap the oldest read goes first, then the oldest of any state', ()
 	expect(MAX_FILES).toBe(200)
 })
 
+test('the cap never evicts the file just touched', () => {
+	const full = [entry('/r/e1', 'edited', 1), entry('/r/e2', 'edited', 2)]
+	expect(applyTouch(full, '/r/new', 'read', 3, 2).map(item => [item.path, item.state, item.at])).toEqual([
+		['/r/e2', 'edited', 2],
+		['/r/new', 'read', 3]
+	])
+})
+
 test('a commit turns only the listed edited files committed', () => {
 	const list = [entry('/r/a', 'edited'), entry('/r/b', 'edited'), entry('/r/c', 'read')]
 	expect(applyCommitted(list, ['/r/a', '/r/c']).map(item => item.state)).toEqual(['committed', 'edited', 'read'])
@@ -56,6 +64,9 @@ test('only Read, Edit, Write and NotebookEdit touch files', () => {
 	expect(touchOf('NotebookEdit')).toBe('edit')
 	expect(touchOf('Grep')).toBeNull()
 	expect(touchOf('toString')).toBeNull()
+})
+
+test('posix turns backslashes into slashes', () => {
 	expect(posix('C:\\repo\\a.js')).toBe('C:/repo/a.js')
 })
 
@@ -65,7 +76,13 @@ test('a git commit is spotted through global options and chains, and nothing els
 		'git -C app commit -am x',
 		'git add . && git commit --amend',
 		'git -c user.email=a@b commit -m x',
-		'cd x; git --no-pager commit'
+		'cd x; git --no-pager commit',
+		'GIT_CONFIG_GLOBAL=/dev/null git -c user.email=a@b commit -m x',
+		'cd /x && GIT_EDITOR=true git commit',
+		'a || git commit',
+		'x | git commit',
+		'make\ngit commit',
+		'git --git-dir=.git commit'
 	])
 		expect(isGitCommit(command)).toBe(true)
 	for (const command of ['git log --grep commit', 'echo git commit', 'git commit-tree abc', 'git status', 'npm run commit'])
@@ -75,6 +92,11 @@ test('a git commit is spotted through global options and chains, and nothing els
 test('git status -z output gives the dirty paths, skipping a rename’s old name', () => {
 	expect([...dirtyPaths(' M src/a.js\0?? new.txt\0R  b.js\0old-b.js\0')]).toEqual(['src/a.js', 'new.txt', 'b.js'])
 	expect(dirtyPaths('').size).toBe(0)
+})
+
+test('a rename or copy in either status column skips its old name', () => {
+	expect([...dirtyPaths(' R new.js\0src/old.js\0 M z.js\0')]).toEqual(['new.js', 'z.js'])
+	expect([...dirtyPaths('C  copy.js\0orig.js\0')]).toEqual(['copy.js'])
 })
 
 test('the tree merges single-folder chains, lists folders before files and puts outside files last', () => {
@@ -108,7 +130,8 @@ test('the tree merges single-folder chains, lists folders before files and puts 
 		state: 'edited'
 	})
 	expect(rows[0]).toEqual({ kind: 'dir', key: 'dir:/src/pricing', prefix: '├', name: 'src/pricing/' })
-	expect(rows[6]).toMatchObject({ kind: 'dir', isOutside: true })
+	expect(rows[6]).toEqual({ kind: 'dir', key: 'out:/outside project', prefix: '└', name: 'outside project/', isOutside: true })
+	expect(rows[7]).toMatchObject({ key: 'out:/outside project/Users/me', isOutside: true })
 	expect(fileTree([], '/repo')).toEqual([])
 })
 
@@ -129,4 +152,46 @@ test('the headline names the live file while the agent runs and sums the files o
 	expect(headline(list, false, '/repo')).toEqual({ label: 'DONE', line: 'edited 1, committed 1, read 2', where: '' })
 	expect(headline([], false, '/repo').line).toBe('No files yet.')
 	expect(headline([], true, '/repo').line).toBe('No files yet.')
+})
+
+test('a project folder named like the outside branch keeps its own keys', () => {
+	const rows = fileTree([entry('/repo/outside project/a.js', 'read'), entry('/tmp/b.js', 'read')], '/repo')
+	expect(rows.map(row => row.key)).toEqual([
+		'dir:/outside project',
+		'file:/repo/outside project/a.js',
+		'out:/outside project',
+		'out:/outside project/tmp',
+		'file:/tmp/b.js'
+	])
+	expect(new Set(rows.map(row => row.key)).size).toBe(rows.length)
+})
+
+test('empty path segments are ignored inside and outside the project', () => {
+	const rows = fileTree([entry('/repo/src//a.js', 'read'), entry('/x//y/b.js', 'read')], '/repo')
+	expect(rows.map(row => [row.kind, row.name])).toEqual([
+		['dir', 'src/'],
+		['file', 'a.js'],
+		['dir', 'outside project/'],
+		['dir', 'x/y/'],
+		['file', 'b.js']
+	])
+})
+
+test('the tree and headline read a root of / or one with a trailing slash', () => {
+	const list = [entry('/repo/src/a.js', 'read')]
+	expect(fileTree(list, '/repo/')).toEqual(fileTree(list, '/repo'))
+	expect(headline(list, true, '/repo/')).toEqual(headline(list, true, '/repo'))
+	expect(fileTree(list, '/').map(row => [row.name, row.kind])).toEqual([
+		['repo/src/', 'dir'],
+		['a.js', 'file']
+	])
+	expect(headline(list, true, '/')).toEqual({ label: 'RIGHT NOW', line: 'Reading a.js', where: 'repo/src' })
+})
+
+test('a file directly under / outside the project keeps / as its folder', () => {
+	expect(headline([entry('/notes.md', 'read')], true, '/repo')).toEqual({
+		label: 'RIGHT NOW',
+		line: 'Reading notes.md',
+		where: '/'
+	})
 })

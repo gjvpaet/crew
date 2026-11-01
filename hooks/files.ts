@@ -13,7 +13,7 @@ export const touchOf = (tool: string): Touch | null =>
 export const posix = (path: string) => path.replace(/\\/g, '/')
 
 // A read never takes a file back from edited or committed; an edit always makes it edited, a committed file included.
-// The touched file moves to the end, so the list runs oldest to latest.
+// The touched file moves to the end, so the list runs oldest to latest, and it is never the one a cap drops.
 export function applyTouch(
 	entries: readonly FileEntry[],
 	path: string,
@@ -24,9 +24,10 @@ export function applyTouch(
 	const found = entries.find(item => item.path === path)
 	const state: FileState = touch === 'edit' ? 'edited' : (found?.state ?? 'read')
 	const next = [...entries.filter(item => item.path !== path), { path, state, at }]
-	while (next.length > cap) {
-		const reads = next.filter(item => item.state === 'read')
-		const pool = reads.length > 0 ? reads : next
+	while (next.length > cap && next.length > 1) {
+		const others = next.slice(0, -1)
+		const reads = others.filter(item => item.state === 'read')
+		const pool = reads.length > 0 ? reads : others
 		const oldest = pool.reduce((a, b) => (b.at < a.at ? b : a))
 		next.splice(next.indexOf(oldest), 1)
 	}
@@ -44,18 +45,23 @@ export const latestOf = (entries: readonly FileEntry[]) =>
 // Global options that take the next word as their value, so the word after them is still not the subcommand.
 const VALUED = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--exec-path', '--config-env'])
 
-// True when some git command in the line, past its global options, has `commit` as its subcommand.
+const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/
+
+// True when some git command in the line, past any leading NAME=value words and its global options, has `commit` as
+// its subcommand. A word-split heuristic that ignores quoting: a false positive only costs one extra `git status`.
 export function isGitCommit(command: string): boolean {
 	return command.split(/&&|\|\||[;|\n]/).some(part => {
 		const words = part.trim().split(/\s+/)
-		if (words[0] !== 'git') return false
-		let at = 1
+		let start = 0
+		while (start < words.length && ASSIGNMENT.test(words[start])) start++
+		if (words[start] !== 'git') return false
+		let at = start + 1
 		while (at < words.length && words[at].startsWith('-')) at += VALUED.has(words[at]) ? 2 : 1
 		return words[at] === 'commit'
 	})
 }
 
-// `git status --porcelain -z`: `XY path` entries split by NUL, a rename or copy followed by its old path.
+// `git status --porcelain -z`: `XY path` entries split by NUL, a rename or copy (in either column) followed by its old path.
 export function dirtyPaths(porcelainZ: string): Set<string> {
 	const tokens = porcelainZ.split('\0')
 	const dirty = new Set<string>()
@@ -63,7 +69,7 @@ export function dirtyPaths(porcelainZ: string): Set<string> {
 		const token = tokens[at]
 		if (token.length < 4) continue
 		dirty.add(token.slice(3))
-		if (token[0] === 'R' || token[0] === 'C') at++
+		if ('RC'.includes(token[0]) || 'RC'.includes(token[1])) at++
 	}
 	return dirty
 }
@@ -71,7 +77,10 @@ export function dirtyPaths(porcelainZ: string): Set<string> {
 const isInside = (root: string, path: string) => root !== '' && path.startsWith(root.endsWith('/') ? root : `${root}/`)
 const relativeTo = (root: string, path: string) => path.slice(root.replace(/\/$/, '').length + 1)
 const basename = (path: string) => path.slice(path.lastIndexOf('/') + 1)
-const dirname = (path: string) => (path.lastIndexOf('/') < 0 ? '' : path.slice(0, path.lastIndexOf('/')))
+const dirname = (path: string) => {
+	const at = path.lastIndexOf('/')
+	return at < 0 ? '' : at === 0 ? '/' : path.slice(0, at)
+}
 
 export type Headline = { label: 'RIGHT NOW' | 'DONE'; line: string; where: string }
 
@@ -134,7 +143,7 @@ export function fileTree(entries: readonly FileEntry[], root: string): TreeRow[]
 	const top = newNode('', false)
 	const outside = newNode('outside project', true)
 	for (const item of entries) {
-		if (isInside(root, item.path)) place(top, relativeTo(root, item.path).split('/'), item)
+		if (isInside(root, item.path)) place(top, relativeTo(root, item.path).split('/').filter(Boolean), item)
 		else place(outside, item.path.split('/').filter(Boolean), item)
 	}
 	const hasOutside = outside.files.length > 0 || outside.dirs.size > 0
@@ -159,7 +168,7 @@ export function fileTree(entries: readonly FileEntry[], root: string): TreeRow[]
 			// The outside branch keeps its own name: merging it into the folders under it would hide what it is.
 			const { name, node: inner } = child.dir === outside ? { name: outside.name, node: outside } : merged(child.dir)
 			const path = `${keyPath}/${name}`
-			rows.push({ kind: 'dir', key: `dir:${path}`, prefix, name: `${name}/`, ...(child.dir.isOutside ? { isOutside: true as const } : {}) })
+			rows.push({ kind: 'dir', key: `${child.dir.isOutside ? 'out' : 'dir'}:${path}`, prefix, name: `${name}/`, ...(child.dir.isOutside ? { isOutside: true as const } : {}) })
 			walk(inner, `${guides}${isLast ? NB : '│'}${NB}`, path)
 		})
 	}
