@@ -3,10 +3,11 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { AgentStatusView, MascotPrefs } from '../types'
 import { registerBand } from './band'
+import { dirtyPaths, isGitCommit, posix, touchOf } from './files'
 import { SET_MASCOT_SPEC, SET_MASCOT_TOOL, applyMascotChange, parseMascotInput, sanitizeMascots } from './mascot'
 import { isMoving, openPane, registerPanel, syncPaneShown } from './panel'
 import { TASK_TOOLS } from './tasks'
-import { EMPTY_STATE, isPulsing, isTicking, reduce, type CrewEvent } from './tracker'
+import { EMPTY_STATE, MAIN, isPulsing, isTicking, reduce, type CrewEvent } from './tracker'
 
 // The engine's scan follows state refs only through consts of the same file, so each file declares its own.
 const model = atom({ plugin: 'crew', key: 'model' } as const, EMPTY_STATE)
@@ -87,6 +88,46 @@ async function introducePane($: EngineInterface, isSidebar: boolean | undefined)
 	if (!isFirst) return
 	if (isSidebar === true) void openPane($)
 	else $.ui.toast('Crew: /crew opens the Agents panel')
+}
+
+// What an agent reads and edits, for its Files pane; a commit it makes is checked against git once the call returns.
+async function recordFiles($: EngineInterface, tool: string, input: Record<string, unknown>, agentId: string | undefined) {
+	const touch = touchOf(tool)
+	const path =
+		typeof input.file_path === 'string' ? input.file_path : typeof input.notebook_path === 'string' ? input.notebook_path : ''
+	if (touch && path) {
+		await apply($, { kind: 'touch', at: await $.clock.now(), agentId, path: posix(path), touch })
+		return
+	}
+	if (tool === 'Bash' && typeof input.command === 'string' && isGitCommit(input.command)) {
+		void checkCommit($, agentId).catch(() => undefined)
+	}
+}
+
+const GIT_MS = 5_000
+
+// Which of the agent's edited files git now holds clean: those turn committed, with the commit's short SHA. Paths
+// outside the repository are left out, since git refuses a status that names one.
+async function checkCommit($: EngineInterface, agentId: string | undefined) {
+	const files = (await read($, model)).files?.[agentId ?? MAIN] ?? []
+	const edited = files.filter(item => item.state === 'edited').map(item => item.path)
+	if (edited.length === 0) return
+	const cwd = posix(await $.session.cwd())
+	const top = await $.process.run(['git', '-C', cwd, 'rev-parse', '--show-toplevel'], { timeoutMs: GIT_MS })
+	if (top.exitCode !== 0) return
+	const root = posix(top.stdout.trim())
+	const inRepo = edited.filter(path => path.startsWith(`${root}/`))
+	if (inRepo.length === 0) return
+	const status = await $.process.run(['git', '-C', cwd, 'status', '--porcelain', '-z', '--', ...inRepo], { timeoutMs: GIT_MS })
+	if (status.exitCode !== 0) return
+	const dirty = new Set([...dirtyPaths(status.stdout)].map(path => `${root}/${path}`))
+	const head = await $.process.run(['git', '-C', cwd, 'rev-parse', '--short', 'HEAD'], { timeoutMs: GIT_MS })
+	await apply($, {
+		kind: 'committed',
+		agentId,
+		paths: inRepo.filter(path => !dirty.has(path)),
+		...(head.exitCode === 0 ? { sha: head.stdout.trim() } : {})
+	})
 }
 
 export const register: Register = on => {
@@ -218,8 +259,10 @@ export const register: Register = on => {
 			return { result: mascotSaved(parsed.role, prefs[parsed.role]) }
 		}
 		const ran = await next(e)
-		if (TASK_TOOLS.has(tool) && ran.deny === undefined && ran.isError !== true) {
-			await apply($, { kind: 'tasks', agentId: e.agentId, call: { tool, input: toolInput(e), result: ran.result } })
+		if (ran.deny === undefined && ran.isError !== true) {
+			const input = toolInput(e)
+			if (TASK_TOOLS.has(tool)) await apply($, { kind: 'tasks', agentId: e.agentId, call: { tool, input, result: ran.result } })
+			await recordFiles($, tool, input, e.agentId)
 		}
 		return ran
 	}).catch(($, e, next) => next(e)) // a Crew failure never fails a tool call

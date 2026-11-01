@@ -2,6 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 
 import type { MascotPrefs } from '../types'
+import { showFiles } from './files-pane'
 import type { Species, SpriteCell } from './sprite'
 import { barSvg, pipHeight, pipSvg, pipWidth } from './svg'
 import { EMPTY_STATE } from './tracker'
@@ -26,6 +27,7 @@ const model = atom({ plugin: 'crew', key: 'model' } as const, EMPTY_STATE)
 const groupOpen = atom({ plugin: 'crew', key: 'groupOpen' } as const, {} as Record<string, boolean>)
 const mascots = atom({ plugin: 'crew', key: 'mascots' } as const, {} as MascotPrefs)
 const isPaneShown = atom({ plugin: 'crew', key: 'isPaneShown' } as const, false)
+const filesFor = atom({ plugin: 'crew', key: 'filesFor' } as const, null as string | null)
 
 const TONE: Record<Tone, string> = { running: 'claude', waiting: 'inactive', done: 'success', failed: 'error' }
 
@@ -82,6 +84,13 @@ const cellProps = (cell: SpriteCell) => ({
 const barAlt = (row: RowView) =>
 	`${row.title} progress ${row.fraction === null ? 'working' : `${Math.round(row.fraction * 100)}%`}`
 
+// The chevron that opens an agent's files: bright while the Files pane shows that agent, dimmed otherwise.
+const chevronProps = (row: RowView) => ({
+	plain: true,
+	...(row.isFilesShown ? {} : { dimColor: true }),
+	label: `${row.isFilesShown ? '▾' : '▸'} ${row.fileCount}`
+})
+
 // Opens the Agents pane and notes whether a surface draws it, so the band can offer it back once it is closed.
 export async function openPane($: EngineInterface) {
 	const opened = await $.ui.open({ id: PANE, title: 'Agents' })
@@ -111,9 +120,10 @@ export function registerPanel(on: On) {
 		const state = await read($, model)
 		const prefs = await read($, mascots)
 		const open = await read($, groupOpen)
+		const shownFiles = await read($, filesFor)
 		const now = await $.clock.now()
 		const barColumns = Math.max(8, e.props.bodyColumns - CARD_CHROME - SIDE_COLUMNS)
-		const view = panelView(state, prefs, now, barColumns, open, { sprites: !Svg })
+		const view = panelView(state, prefs, now, barColumns, open, { sprites: !Svg, filesFor: shownFiles })
 		if (now - drawnAt > STALE_MS) placement = {}
 		;({ placement, moves } = trackMoves(view, placement, moves, now))
 		drawnAt = now
@@ -207,7 +217,7 @@ export function registerPanel(on: On) {
 				<Box flexDirection="column" flexGrow={1} width={0}>
 					<Box flexDirection="row" gap={1}>
 						{/* The title gives way first; Main's waiting note keeps its width beside it. */}
-						<Box flexShrink={1}>
+						<Box flexShrink={1} flexGrow={1}>
 							<Text weight="semibold" wrap="truncate-end">
 								{row.title}
 							</Text>
@@ -215,6 +225,11 @@ export function registerPanel(on: On) {
 						{row.waiting && (
 							<Box flexShrink={0}>
 								<Text color={TONE[row.tone]}>{row.waiting}</Text>
+							</Box>
+						)}
+						{row.fileCount > 0 && (
+							<Box flexShrink={0}>
+								<Button key={`files-${row.id}`} {...chevronProps(row)} onPress={() => showFiles($, row.id)} />
 							</Box>
 						)}
 					</Box>
@@ -246,6 +261,9 @@ export function registerPanel(on: On) {
 				<Box flexGrow={1} width={0}>
 					<Text wrap="truncate-end">{row.title}</Text>
 				</Box>
+				{row.fileCount > 0 && (
+					<Button key={`files-${row.id}`} {...chevronProps(row)} onPress={() => showFiles($, row.id)} />
+				)}
 				<Text dimColor tabular>
 					{row.elapsed}
 				</Text>
