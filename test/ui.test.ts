@@ -261,7 +261,9 @@ test('set_mascot saves the change', async ($, on) => {
 	await startTwoAgents($, on)
 	const ran = await $.tool.call({ tool: 'mcp__crew__set_mascot', role: 'designer', accessory: 'hardhat' } as any)
 	expect(ran.deny).toBeUndefined()
-	expect(ran.result).toEqual({ ok: true, role: 'designer', prefs: { accessory: 'hardhat' } })
+	expect(ran.result).toBe('Saved the designer mascot: {"accessory":"hardhat"}.')
+	const reset = await $.tool.call({ tool: 'mcp__crew__set_mascot', role: 'designer', reset: true } as any)
+	expect(reset.result).toBe('The designer mascot is back to its default look.')
 	const refused = await $.tool.call({ tool: 'mcp__crew__set_mascot', role: 'pilot' } as any)
 	expect(refused.deny).toBe('role must be one of developer, designer, researcher, reviewer, plain')
 })
@@ -443,9 +445,9 @@ test('mascot prefs load from the store at the start of each main turn, sanitised
 		await pane.unmount()
 	}
 	const designer = await $.tool.call({ tool: 'mcp__crew__set_mascot', role: 'designer', body: '#112233' } as any)
-	expect(designer.result).toEqual({ ok: true, role: 'designer', prefs: { accessory: 'hardhat', body: '#112233' } })
+	expect(designer.result).toBe('Saved the designer mascot: {"accessory":"hardhat","body":"#112233"}.')
 	const researcher = await $.tool.call({ tool: 'mcp__crew__set_mascot', role: 'researcher', body: '#112233' } as any)
-	expect(researcher.result).toEqual({ ok: true, role: 'researcher', prefs: { body: '#112233' } })
+	expect(researcher.result).toBe('Saved the researcher mascot: {"body":"#112233"}.')
 })
 
 test('a turn an agent message starts keeps the person prompt as the band title', async ($, on) => {
@@ -650,11 +652,12 @@ test('Claude can open the Agents panel with the open_panel tool', async ($, on) 
 	expect(registered).toContain('open_panel')
 	const ran = await $.tool.call({ tool: 'mcp__crew__open_panel' } as any)
 	expect(opened).toEqual(['crew'])
-	expect(ran.result).toEqual({ ok: true, isPlaced: true })
+	// An MCP tool's result must be text or content blocks: Claude Code refuses an object with an output-shape error.
+	expect(ran.result).toBe('The Crew Agents panel is open.')
 	// Where no surface can seat the pane, it says how to open it instead.
 	isPlaced = false
 	const unplaced = await $.tool.call({ tool: 'mcp__crew__open_panel' } as any)
-	expect(unplaced.result).toEqual({ ok: true, isPlaced: false })
+	expect(unplaced.result).toMatch(/type \/crew/)
 	expect(toasts.some(text => text.includes('/crew'))).toBe(true)
 })
 

@@ -36,6 +36,11 @@ const OPEN_PANEL_SPEC = {
 		'Open the Crew Agents panel, which shows the plan, each sub-agent with its progress, tokens and cost. Call it when starting multi-step or sub-agent work so the user can follow along.',
 	inputSchema: { type: 'object', properties: {}, additionalProperties: false }
 }
+const OPENED = 'The Crew Agents panel is open.'
+const NOT_PLACED = 'No surface here can show the Crew Agents panel; the user can type /crew to open it.'
+
+const mascotSaved = (role: string, style: object | undefined) =>
+	style ? `Saved the ${role} mascot: ${JSON.stringify(style)}.` : `The ${role} mascot is back to its default look.`
 
 // Origins where a person typed the prompt; every other origin (agents, notifications, triggers) continues a turn.
 const PERSON_ORIGINS = new Set(['composer', 'bridge', 'sdk'])
@@ -197,10 +202,12 @@ export const register: Register = on => {
 
 	on('tool.call', async ($, e, next) => {
 		const tool = String(e.tool)
+		// Crew's tools reach Claude as MCP tools, whose result must be text or content blocks: the engine refuses an
+		// object with an output-shape error.
 		if (tool === OPEN_PANEL_TOOL) {
 			const { isPlaced } = await openPane($)
 			if (!isPlaced) $.ui.toast('Crew: /crew opens the Agents panel')
-			return { result: { ok: true, isPlaced } }
+			return { result: isPlaced ? OPENED : NOT_PLACED }
 		}
 		if (tool === SET_MASCOT_TOOL) {
 			const parsed = parseMascotInput(toolInput(e))
@@ -208,7 +215,7 @@ export const register: Register = on => {
 			await update($, mascots, prefs => applyMascotChange(prefs, parsed))
 			const prefs = await read($, mascots)
 			await $.store.set('mascots', prefs)
-			return { result: { ok: true, role: parsed.role, prefs: prefs[parsed.role] ?? 'default' } }
+			return { result: mascotSaved(parsed.role, prefs[parsed.role]) }
 		}
 		const ran = await next(e)
 		if (TASK_TOOLS.has(tool) && ran.deny === undefined && ran.isError !== true) {
