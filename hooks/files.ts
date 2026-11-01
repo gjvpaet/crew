@@ -126,6 +126,9 @@ export const dirname = (path: string) => {
 	return at < 0 ? '' : at === 0 ? '/' : path.slice(0, at)
 }
 
+const isEndedStatus = (status: AgentStatusView) =>
+	status === 'completed' || status === 'failed' || status === 'killed' || status === 'stopped'
+
 export type Headline = { label: 'RIGHT NOW' | 'WAITING' | 'DONE'; line: string; where: string }
 
 const VERBS: Record<FileState, string> = { read: 'Reading', edited: 'Editing', committed: 'Committed' }
@@ -133,8 +136,7 @@ const VERBS: Record<FileState, string> = { read: 'Reading', edited: 'Editing', c
 // While the agent runs, or waits (pending, waiting, idle) for what comes next: what it touched last and where. Once
 // it has ended (completed, failed, killed, stopped): how many files of each kind.
 export function headline(entries: readonly FileEntry[], status: AgentStatusView, root: string): Headline {
-	const isEnded = status === 'completed' || status === 'failed' || status === 'killed' || status === 'stopped'
-	if (!isEnded) {
+	if (!isEndedStatus(status)) {
 		const label = status === 'running' ? 'RIGHT NOW' : 'WAITING'
 		const live = latestOf(entries)
 		if (!live) return { label, line: 'No files yet.', where: '' }
@@ -146,6 +148,185 @@ export function headline(entries: readonly FileEntry[], status: AgentStatusView,
 		.filter(([, count]) => count > 0)
 		.map(([state, count]) => `${state} ${count}`)
 	return { label: 'DONE', line: counts.length > 0 ? counts.join(', ') : 'No files yet.', where: '' }
+}
+
+export type ChipTone = 'code' | 'docs' | 'data' | 'other'
+
+const TONES: Record<ChipTone, string> = {
+	code: 'js jsx ts tsx mjs cjs py rb go rs java kt swift c h cpp cs php sh vue svelte css scss html',
+	docs: 'md mdx txt rst pdf doc docx',
+	data: 'json yaml yml toml csv xml sql lock env',
+	other: ''
+}
+
+const TONE_OF = new Map<string, ChipTone>(
+	(['code', 'docs', 'data'] as const).flatMap(tone => TONES[tone].split(' ').map(ext => [ext, tone] as const))
+)
+
+// The type chip of a row: the extension of the file name (a dot in a folder does not count), upper-cased and cut to 4.
+export function chipOf(path: string): { label: string; tone: ChipTone } {
+	const name = basename(path)
+	const ext = name.slice(name.lastIndexOf('.') + 1).toLowerCase()
+	if (!name.includes('.') || ext === '') return { label: 'FILE', tone: 'other' }
+	return { label: ext.toUpperCase().slice(0, 4), tone: TONE_OF.get(ext) ?? 'other' }
+}
+
+export type TouchedRow = {
+	key: string
+	path: string
+	name: string
+	// Relative to the project, '.' at its root, absolute outside it.
+	folder: string
+	state: FileState
+	// The live row's pill says what is happening (reading, editing); the others say what happened.
+	pill: string
+	isLive: boolean
+	// 0 when unknown.
+	added: number
+	removed: number
+	chip: { label: string; tone: ChipTone }
+}
+
+const PAST: Record<FileState, string> = { read: 'read', edited: 'edited', committed: 'committed' }
+const PRESENT: Record<FileState, string> = { read: 'reading', edited: 'editing', committed: 'committed' }
+
+// The agent's files as flat rows, newest touch first. Only the latest touch is live, and only while the agent runs.
+export function touchedRows(
+	entries: readonly FileEntry[],
+	root: string,
+	status: AgentStatusView,
+	lines: Record<string, [number, number]>
+): TouchedRow[] {
+	const live = status === 'running' ? latestOf(entries) : undefined
+	// A tie goes to the later entry, as latestOf does, so the row that is live is also the first.
+	return entries
+		.map((item, index) => ({ item, index }))
+		.sort((a, b) => b.item.at - a.item.at || b.index - a.index)
+		.map(({ item }) => {
+			const isLive = item === live
+			const shown = isInside(root, item.path) ? relativeTo(root, item.path) : item.path
+			const [added, removed] = lines[item.path] ?? [0, 0]
+			return {
+				key: `file:${item.path}`,
+				path: item.path,
+				name: basename(item.path),
+				folder: dirname(shown) || '.',
+				state: item.state,
+				pill: (isLive ? PRESENT : PAST)[item.state],
+				isLive,
+				added,
+				removed,
+				chip: chipOf(item.path)
+			}
+		})
+}
+
+export type RightNow = {
+	label: 'RIGHT NOW' | 'WAITING' | 'DONE'
+	tone: FileState | 'waiting'
+	icon: 'eye' | 'pencil' | 'check' | 'pause'
+	title: string
+	subtitle: string
+	// The live or latest file's counts, 0 when unknown.
+	added: number
+	removed: number
+	// Across the agent's files that have counts.
+	totals: { added: number; removed: number }
+	// The repository of the latest touch, when it is one of the known ones.
+	repoTop: string | null
+}
+
+const ICON_OF: Record<FileState, RightNow['icon']> = { read: 'eye', edited: 'pencil', committed: 'check' }
+const DONE_VERB: Record<FileState, string> = { read: 'Read', edited: 'Edited', committed: 'Committed' }
+
+// '+12 −3'; a side that is 0 is left out, and so is the whole of it when both are.
+const countsText = (added: number, removed: number) =>
+	[added > 0 ? `+${added}` : '', removed > 0 ? `\u2212${removed}` : ''].filter(Boolean).join(' ')
+
+// What the Right-now card shows: the live file while the agent runs or waits, a summary once it has ended.
+export function rightNow(
+	entries: readonly FileEntry[],
+	status: AgentStatusView,
+	root: string,
+	lines: Record<string, [number, number]>,
+	repos: Record<string, { branch: string | null; changed: number }>
+): RightNow {
+	const latest = latestOf(entries)
+	const [added, removed] = (latest && lines[latest.path]) || [0, 0]
+	const totals = entries.reduce(
+		(sum, item) => {
+			const [a, r] = lines[item.path] ?? [0, 0]
+			return { added: sum.added + a, removed: sum.removed + r }
+		},
+		{ added: 0, removed: 0 }
+	)
+	const repoTop =
+		latest === undefined
+			? null
+			: Object.keys(repos)
+					.filter(top => latest.path.startsWith(top.endsWith('/') ? top : `${top}/`))
+					.reduce<string | null>((best, top) => (best === null || top.length > best.length ? top : best), null)
+	const base = { added, removed, totals, repoTop }
+
+	if (isEndedStatus(status)) {
+		const counts = (['edited', 'committed', 'read'] as const)
+			.map(state => [state, entries.filter(item => item.state === state).length] as const)
+			.filter(([, count]) => count > 0)
+		if (counts.length === 0) return { ...base, label: 'DONE', tone: 'read', icon: 'check', title: 'No files yet', subtitle: '' }
+		const [state, count] = counts[0]
+		return {
+			...base,
+			label: 'DONE',
+			tone: state,
+			icon: 'check',
+			title: `${DONE_VERB[state]} ${count} ${count === 1 ? 'file' : 'files'}`,
+			subtitle: counts.map(([name, n]) => `${name} ${n}`).join(', ')
+		}
+	}
+
+	const isRunning = status === 'running'
+	const label = isRunning ? 'RIGHT NOW' : 'WAITING'
+	if (!latest) {
+		return { ...base, label, tone: isRunning ? 'read' : 'waiting', icon: isRunning ? 'eye' : 'pause', title: 'No files yet', subtitle: '' }
+	}
+	const shown = isInside(root, latest.path) ? relativeTo(root, latest.path) : latest.path
+	return {
+		...base,
+		label,
+		tone: isRunning ? latest.state : 'waiting',
+		icon: isRunning ? ICON_OF[latest.state] : 'pause',
+		title: `${VERBS[latest.state]} ${basename(shown)}`,
+		subtitle: [dirname(shown), countsText(added, removed)].filter(Boolean).join('  ')
+	}
+}
+
+// Terminal shine: one colour per letter, a 3-letter band of `bright` moving one letter per 120 ms across `base`, wrapping.
+export function shineColors(text: string, now: number, base: string, bright: string): string[] {
+	const letters = Array.from(text)
+	const start = Math.floor(now / 120) % Math.max(letters.length, 1)
+	return letters.map((_, at) => ((at - start + letters.length) % letters.length < 3 ? bright : base))
+}
+
+const count = (text: string) => (/^\d+$/.test(text) ? Number(text) : 0)
+
+// `git diff --numstat -z` output as path (relative to the repository top, as git prints it) to [added, removed]; a
+// binary file's `-` counts as 0. A rename is printed as an empty path then the old and the new one; the new one is kept.
+export function numstat(stdout: string): Record<string, [number, number]> {
+	const tokens = stdout.split('\0')
+	const found: Record<string, [number, number]> = {}
+	for (let at = 0; at < tokens.length; at++) {
+		const token = tokens[at]
+		const first = token.indexOf('\t')
+		const second = token.indexOf('\t', first + 1)
+		if (first < 0 || second < 0) continue
+		let path = token.slice(second + 1)
+		if (path === '') {
+			path = tokens[at + 2] ?? ''
+			at += 2
+		}
+		if (path !== '') found[path] = [count(token.slice(0, first)), count(token.slice(first + 1, second))]
+	}
+	return found
 }
 
 export type TreeRow =

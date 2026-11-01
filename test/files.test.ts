@@ -14,9 +14,14 @@ import {
 	isGitCommit,
 	joinUp,
 	latestOf,
+	numstat,
 	openCommand,
 	posix,
-	touchOf
+	rightNow,
+	shineColors,
+	touchOf,
+	touchedRows,
+	chipOf
 } from '../hooks/files'
 import { EMPTY_STATE, reduce, type CrewEvent } from '../hooks/tracker'
 import { agentAccent, panelView, pulseAt, ACCENTS } from '../hooks/view'
@@ -350,4 +355,197 @@ test('the scan skips folders that hold dependencies, builds and caches', () => {
 	expect(SCAN_PRUNE.slice(0, 2)).toEqual(['.git', 'node_modules'])
 	expect(SCAN_PRUNE).toContain('__pycache__')
 	expect(new Set(SCAN_PRUNE).size).toBe(SCAN_PRUNE.length)
+})
+
+test('a chip is the upper-cased extension, cut to 4, toned by kind', () => {
+	expect(chipOf('/r/a.jsx')).toEqual({ label: 'JSX', tone: 'code' })
+	expect(chipOf('/r/a.test.JS')).toEqual({ label: 'JS', tone: 'code' })
+	expect(chipOf('/r/README.md')).toEqual({ label: 'MD', tone: 'docs' })
+	expect(chipOf('/r/package.json')).toEqual({ label: 'JSON', tone: 'data' })
+	expect(chipOf('/r/.env')).toEqual({ label: 'ENV', tone: 'data' })
+	expect(chipOf('/r/logo.png')).toEqual({ label: 'PNG', tone: 'other' })
+	expect(chipOf('/r/Makefile')).toEqual({ label: 'FILE', tone: 'other' })
+	expect(chipOf('/r/trailing.')).toEqual({ label: 'FILE', tone: 'other' })
+	expect(chipOf('/r/notes.markdown')).toEqual({ label: 'MARK', tone: 'other' })
+	// The dot of a folder is not an extension.
+	expect(chipOf('/r/v1.2/Makefile')).toEqual({ label: 'FILE', tone: 'other' })
+})
+
+const list = [
+	entry('/repo/src/pricing/PriceTable.jsx', 'edited', 3),
+	entry('/repo/README.md', 'read', 1),
+	entry('/repo/test/a.test.jsx', 'committed', 2),
+	entry('/elsewhere/x.json', 'read', 4)
+]
+
+test('the touched rows run newest first and carry name, folder, chip and counts', () => {
+	const rows = touchedRows(list, '/repo', 'completed', { '/repo/src/pricing/PriceTable.jsx': [12, 3] })
+	expect(rows.map(row => row.path)).toEqual([
+		'/elsewhere/x.json',
+		'/repo/src/pricing/PriceTable.jsx',
+		'/repo/test/a.test.jsx',
+		'/repo/README.md'
+	])
+	expect(rows[1]).toEqual({
+		key: 'file:/repo/src/pricing/PriceTable.jsx',
+		path: '/repo/src/pricing/PriceTable.jsx',
+		name: 'PriceTable.jsx',
+		folder: 'src/pricing',
+		state: 'edited',
+		pill: 'edited',
+		isLive: false,
+		added: 12,
+		removed: 3,
+		chip: { label: 'JSX', tone: 'code' }
+	})
+	// Missing counts are 0; the root is '.', and outside the project the folder is absolute.
+	expect(rows.map(row => row.folder)).toEqual(['/elsewhere', 'src/pricing', 'test', '.'])
+	expect(rows[0]).toMatchObject({ added: 0, removed: 0 })
+	expect(touchedRows([entry('/top.js', 'read')], '/repo', 'running', {})[0].folder).toBe('/')
+})
+
+test('equal touch times keep the later entry first', () => {
+	const rows = touchedRows([entry('/r/a', 'read', 5), entry('/r/b', 'read', 5)], '/r', 'completed', {})
+	expect(rows.map(row => row.name)).toEqual(['b', 'a'])
+})
+
+test('only the latest touch is live, and only while the agent runs, with its own pill words', () => {
+	const running = touchedRows(list, '/repo', 'running', {})
+	expect(running.map(row => [row.isLive, row.pill])).toEqual([
+		[true, 'reading'],
+		[false, 'edited'],
+		[false, 'committed'],
+		[false, 'read']
+	])
+	expect(touchedRows([entry('/r/a', 'edited')], '/r', 'running', {})[0].pill).toBe('editing')
+	expect(touchedRows([entry('/r/a', 'committed')], '/r', 'running', {})[0].pill).toBe('committed')
+	for (const status of ['idle', 'waiting', 'pending', 'completed', 'failed', 'killed', 'stopped'] as const)
+		expect(touchedRows(list, '/repo', status, {}).some(row => row.isLive)).toBe(false)
+	expect(touchedRows([], '/repo', 'running', {})).toEqual([])
+})
+
+test('the touched rows read a root with a trailing slash or of /', () => {
+	expect(touchedRows(list, '/repo/', 'running', {})).toEqual(touchedRows(list, '/repo', 'running', {}))
+	expect(touchedRows([entry('/repo/src/a.js', 'read')], '/', 'completed', {})[0].folder).toBe('repo/src')
+})
+
+test('right now names the live file with its folder and counts while the agent runs', () => {
+	const lines = { '/repo/src/pricing/PriceTable.jsx': [12, 3] as [number, number] }
+	const now = rightNow([entry('/repo/src/pricing/PriceTable.jsx', 'edited', 3)], 'running', '/repo', lines, {})
+	expect(now).toEqual({
+		label: 'RIGHT NOW',
+		tone: 'edited',
+		icon: 'pencil',
+		title: 'Editing PriceTable.jsx',
+		subtitle: 'src/pricing  +12 \u22123',
+		added: 12,
+		removed: 3,
+		totals: { added: 12, removed: 3 },
+		repoTop: null
+	})
+	expect(rightNow([entry('/repo/a.js', 'read')], 'running', '/repo', {}, {})).toMatchObject({
+		tone: 'read',
+		icon: 'eye',
+		title: 'Reading a.js',
+		subtitle: '',
+		added: 0,
+		removed: 0
+	})
+	expect(rightNow([entry('/repo/a.js', 'committed')], 'running', '/repo', {}, {})).toMatchObject({
+		tone: 'committed',
+		icon: 'check',
+		title: 'Committed a.js'
+	})
+})
+
+test('the subtitle is the folder, the counts, or both, and an outside folder is absolute', () => {
+	const at = (path: string, counts: Record<string, [number, number]>) =>
+		rightNow([entry(path, 'edited')], 'running', '/repo', counts, {}).subtitle
+	expect(at('/repo/a.js', {})).toBe('')
+	expect(at('/repo/a.js', { '/repo/a.js': [2, 0] })).toBe('+2')
+	expect(at('/repo/a.js', { '/repo/a.js': [0, 5] })).toBe('\u22125')
+	expect(at('/repo/src/a.js', {})).toBe('src')
+	expect(at('/elsewhere/a.js', {})).toBe('/elsewhere')
+	expect(at('/a.js', {})).toBe('/')
+})
+
+test('an agent that waits shows WAITING in amber with a pause, whatever it touched last', () => {
+	for (const status of ['pending', 'waiting', 'idle'] as const)
+		expect(rightNow([entry('/repo/a.js', 'edited')], status, '/repo', {}, {})).toMatchObject({
+			label: 'WAITING',
+			tone: 'waiting',
+			icon: 'pause',
+			title: 'Editing a.js'
+		})
+	expect(rightNow([], 'idle', '/repo', {}, {})).toMatchObject({ label: 'WAITING', icon: 'pause', title: 'No files yet', subtitle: '' })
+})
+
+test('an ended agent shows DONE, titled by its dominant state and summed by state', () => {
+	const mixed = [entry('/repo/a', 'read', 1), entry('/repo/b', 'edited', 2), entry('/repo/c', 'committed', 3), entry('/repo/d', 'edited', 4)]
+	for (const status of ['completed', 'failed', 'killed', 'stopped'] as const)
+		expect(rightNow(mixed, status, '/repo', {}, {})).toMatchObject({
+			label: 'DONE',
+			tone: 'edited',
+			icon: 'check',
+			title: 'Edited 2 files',
+			subtitle: 'edited 2, committed 1, read 1'
+		})
+	expect(rightNow([entry('/r/a', 'committed'), entry('/r/b', 'read'), entry('/r/c', 'committed')], 'completed', '/r', {}, {})).toMatchObject({
+		tone: 'committed',
+		title: 'Committed 2 files',
+		subtitle: 'committed 2, read 1'
+	})
+	expect(rightNow([entry('/r/a', 'read')], 'completed', '/r', {}, {})).toMatchObject({ tone: 'read', title: 'Read 1 file', subtitle: 'read 1' })
+	expect(rightNow([], 'completed', '/r', {}, {})).toMatchObject({ label: 'DONE', icon: 'check', title: 'No files yet', subtitle: '' })
+})
+
+test('right now totals the counts of every file and shows the latest file’s own', () => {
+	const files = [entry('/r/a', 'edited', 1), entry('/r/b', 'edited', 2), entry('/r/c', 'read', 3)]
+	const lines: Record<string, [number, number]> = { '/r/a': [10, 1], '/r/b': [2, 4], '/r/gone': [99, 99] }
+	expect(rightNow(files, 'running', '/r', lines, {})).toMatchObject({ added: 0, removed: 0, totals: { added: 12, removed: 5 } })
+	expect(rightNow(files.slice(0, 2), 'completed', '/r', lines, {})).toMatchObject({ added: 2, removed: 4, totals: { added: 12, removed: 5 } })
+})
+
+test('the repository is the longest known top above the latest file', () => {
+	const repos = {
+		'/repo': { branch: 'main', changed: 1 },
+		'/repo/packages/app': { branch: 'feat/x', changed: 0 },
+		'/repository': { branch: 'other', changed: 2 }
+	}
+	const top = (path: string, known = repos) => rightNow([entry(path, 'read')], 'running', '/repo', {}, known).repoTop
+	expect(top('/repo/packages/app/src/a.js')).toBe('/repo/packages/app')
+	expect(top('/repo/src/a.js')).toBe('/repo')
+	// A sibling that merely starts with the same letters is not above the file.
+	expect(top('/repository/a.js')).toBe('/repository')
+	expect(top('/repo-two/a.js')).toBeNull()
+	expect(top('/repo/src/a.js', {})).toBeNull()
+	expect(rightNow([], 'running', '/repo', {}, repos).repoTop).toBeNull()
+	// While DONE it is the latest touch's repository.
+	expect(rightNow([entry('/repo/packages/app/a', 'read', 2), entry('/repo/b', 'read', 1)], 'completed', '/repo', {}, repos).repoTop).toBe('/repo/packages/app')
+})
+
+test('the terminal shine gives each letter a colour, with a 3-letter band moving every 120 ms', () => {
+	const colors = (now: number) => shineColors('abcdef', now, 'B', 'W')
+	expect(colors(0)).toEqual(['W', 'W', 'W', 'B', 'B', 'B'])
+	expect(colors(119)).toEqual(colors(0))
+	expect(colors(120)).toEqual(['B', 'W', 'W', 'W', 'B', 'B'])
+	// The band wraps past the last letter, and the sweep repeats after one pass.
+	expect(colors(120 * 4)).toEqual(['W', 'B', 'B', 'B', 'W', 'W'])
+	expect(colors(120 * 5)).toEqual(['W', 'W', 'B', 'B', 'B', 'W'])
+	expect(colors(120 * 6)).toEqual(colors(0))
+	expect(shineColors('', 500, 'B', 'W')).toEqual([])
+	expect(shineColors('ab', 0, 'B', 'W')).toEqual(['W', 'W'])
+})
+
+test('numstat reads added and removed counts by path, a binary file as 0 and 0', () => {
+	expect(numstat('12\t3\tsrc/PriceTable.jsx\0')).toEqual({ 'src/PriceTable.jsx': [12, 3] })
+	expect(numstat('1\t0\ta.js\0-\t-\timg/logo.png\0')).toEqual({ 'a.js': [1, 0], 'img/logo.png': [0, 0] })
+	expect(numstat('')).toEqual({})
+	expect(numstat('\0')).toEqual({})
+	// A tab inside the name stays in the name.
+	expect(numstat('2\t1\ta\tb.js\0')).toEqual({ 'a\tb.js': [2, 1] })
+})
+
+test('numstat takes a rename’s new path, which -z prints after an empty name and the old path', () => {
+	expect(numstat('0\t0\t\0old.js\0new.js\0' + '5\t1\tz.js\0')).toEqual({ 'new.js': [0, 0], 'z.js': [5, 1] })
 })
