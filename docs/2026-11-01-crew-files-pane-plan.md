@@ -1023,7 +1023,7 @@ test('the Files pane draws a nested tree with merged folders and each file state
 		expect(state?.text).toBe('edited')
 		expect(state?.props.color).toBe('#F0883E')
 		expect((await files.find({ key: 'state-/repo/src/pricing/usePrices.js' }))?.props.color).toBe('#A371F7')
-		expect((await files.find({ key: 'name-dir:/outside project' }))?.props.dimColor).toBe(true)
+		expect((await files.find({ key: 'name-out:/outside project' }))?.props.dimColor).toBe(true)
 		// No commit yet: the legend leaves committed out, and there is no footer.
 		expect(await files.find({ key: 'legend-committed' })).toBeUndefined()
 		expect(await files.find({ type: 'Text', text: /^committed / })).toBeUndefined()
@@ -1307,13 +1307,35 @@ GIT_CONFIG_GLOBAL=/dev/null git -c user.name="Gabriel Joshua Paet" -c user.email
 **Files:**
 - Test: `test/files-pane.test.ts`. The code was written in Tasks 4 and 5; this task proves it, and fixes it where a test shows a gap.
 
-- [ ] **Step 1: Write the tests**
+How the commit check runs, since the Task 4 review (`hooks/register.tsx`, `checkCommit`):
+- Every git call is `['git', '--no-optional-locks', '-C', <dir>, ...]` with `{ timeoutMs: 5000 }`.
+- For each distinct folder of the agent's edited files it runs `rev-parse --show-cdup` in that folder. If that exits non-zero, the folder's files are skipped (outside any repository). Otherwise the repository top is `joinUp(folder, stdout.trim())`.
+- For each top it runs `status --porcelain -z --ignored --untracked-files=all -- <that top's edited paths>`. Listed paths are dirty; the rest are clean.
+- **New in this task:** a clean file only counts as committed if git tracks it. For each top with clean files, run `ls-files -z --full-name -- <those clean paths>` there (same `['git', '--no-optional-locks', '-C', top, ...]` form). Keep only the clean paths it lists, mapping each listed path back as `${top}/${path}`. If `ls-files` fails, skip that top. This stops a file the agent wrote, then deleted, and never committed from showing as committed: git's status lists nothing for it.
+- Only in a top where something is still clean after that does it run `rev-parse --short HEAD` for the SHA.
+- Nothing turned clean anywhere means nothing is dispatched: no green files and no SHA.
+- A Bash call with `run_in_background: true` is not checked at all.
+
+The test helper `start()` answers `process.run` by the start of the joined argv (`stdout` and `exits` options); unmatched calls exit 0 with empty stdout.
+
+
+**Test plumbing since Task 5 (read before writing the tests):**
+- The kit's `find({ key })` cannot see `key` props on `Text` elements. The tests below look up `state-<path>`, `legend-committed` and similar `Text` keys, and those lookups return undefined.
+- `test/files-pane.test.ts` already has helpers for this. `cells(files, key)` returns the children of the keyed row Box, and `shown(cell)` gives a cell's text.
+  - A file row's Box is keyed `file:<path>`, and its cells are [guide, dot, name cell, state]. So a file's state word is `shown((await cells(files, 'file:<path>'))[3])`, and its colour is that cell's `props.color`.
+  - Find the committed legend item by text (`/^● committed$/`) and the footer by `/^committed /`.
+- Adapt every `state-…` and `legend-…` lookup below to these helpers, keeping the same assertions. Look at how the existing Task 5 tests in that file do it, and copy their style.
+- Opening a file on darwin and linux first runs `test -x <path>`. `start()` answers unmatched calls with exit 0, which means "executable" and so a reveal. Any test that expects a plain `['open', path]` therefore stubs `'test -x': 1` (a more specific `'test -x <path>'` key goes before it, since matching is by prefix and the first match wins).
+- `STATE_COLORS` is exported from `hooks/files-pane.tsx` and the test file already imports it. Use `STATE_COLORS.committed` instead of `'#3FB950'`.
+
+- [ ] **Step 1: Write the tests** (they include the tracked-only rule, so the commit tests fail until Step 2 adds it)
 
 Append to `test/files-pane.test.ts`:
 
 ```ts
 test('pressing a file row opens it in the default app, and a failed open says so', async ($, on) => {
-	const { clock, ran, toasts } = await start($, on, { stdout: { uname: 'Darwin\n' }, exits: { 'open /repo/gone.js': 1 } })
+	// Not executable (`test -x` exits 1), so both rows open rather than reveal.
+	const { clock, ran, toasts } = await start($, on, { stdout: { uname: 'Darwin\n' }, exits: { 'test -x': 1, 'open /repo/gone.js': 1 } })
 	await $.tool.call(read('/repo/a.js', 'a1'))
 	await $.tool.call(read('/repo/gone.js', 'a1'))
 	const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
@@ -1330,28 +1352,40 @@ test('pressing a file row opens it in the default app, and a failed open says so
 	await pane.unmount()
 })
 
+const GIT = 'git --no-optional-locks -C'
+
 test('a successful git commit turns the clean edited files green and shows the SHA', async ($, on) => {
 	const { clock, ran } = await start($, on, {
 		stdout: {
-			'git -C /repo rev-parse --show-toplevel': '/repo\n',
-			'git -C /repo status --porcelain -z --': ' M src/pricing/PriceTable.jsx\0',
-			'git -C /repo rev-parse --short HEAD': 'a1c9e42\n'
-		}
+			[`${GIT} /repo/src/pricing rev-parse --show-cdup`]: '../../\n',
+			[`${GIT} /repo/test rev-parse --show-cdup`]: '../\n',
+			[`${GIT} /repo status`]: ' M src/pricing/PriceTable.jsx\0',
+			[`${GIT} /repo ls-files`]: 'test/PriceTable.test.jsx\0',
+			[`${GIT} /repo rev-parse --short HEAD`]: 'a1c9e42\n'
+		},
+		// Outside any repository.
+		exits: { [`${GIT} /Users/me rev-parse`]: 128 }
 	})
 	await $.tool.call(edit('/repo/src/pricing/PriceTable.jsx', 'a1'))
 	await $.tool.call({ tool: 'Write', file_path: '/repo/test/PriceTable.test.jsx', content: 'x', agentId: 'a1' } as any)
 	await $.tool.call(read('/repo/src/pricing/usePrices.js', 'a1'))
-	// An edit outside the repository is never named to git.
 	await $.tool.call(edit('/Users/me/notes.md', 'a1'))
-	await $.tool.call({ tool: 'Bash', command: 'git add test && git commit -m "Add the test"', agentId: 'a1' } as any)
+	await $.tool.call({
+		tool: 'Bash',
+		command: 'GIT_CONFIG_GLOBAL=/dev/null git add test && GIT_CONFIG_GLOBAL=/dev/null git commit -m "Add the test"',
+		agentId: 'a1'
+	} as any)
 	await clock.settle()
 	expect(ran).toContainEqual([
 		'git',
+		'--no-optional-locks',
 		'-C',
 		'/repo',
 		'status',
 		'--porcelain',
 		'-z',
+		'--ignored',
+		'--untracked-files=all',
 		'--',
 		'/repo/src/pricing/PriceTable.jsx',
 		'/repo/test/PriceTable.test.jsx'
@@ -1371,31 +1405,102 @@ test('a successful git commit turns the clean edited files green and shows the S
 	await pane.unmount()
 })
 
-test('a command that only mentions commit, or a git check that fails, leaves the files edited', async ($, on) => {
-	const { clock, ran } = await start($, on, { exits: { 'git -C /repo rev-parse --show-toplevel': 128 } })
-	await $.tool.call(edit('/repo/a.js', 'a1'))
-	await $.tool.call({ tool: 'Bash', command: 'git log --grep commit', agentId: 'a1' } as any)
+test('an agent working in a git worktree is checked in that worktree', async ($, on) => {
+	const worktree = '/repo/.claude/worktrees/w1'
+	const { clock, ran } = await start($, on, {
+		stdout: {
+			// The folder is the worktree's own top: show-cdup prints an empty line.
+			[`${GIT} ${worktree} rev-parse --show-cdup`]: '\n',
+			[`${GIT} ${worktree} ls-files`]: 'b.js\0',
+			[`${GIT} ${worktree} rev-parse --short HEAD`]: 'f00ba47\n'
+		}
+	})
+	await $.tool.call(edit(`${worktree}/b.js`, 'a1'))
+	await $.tool.call({ tool: 'Bash', command: 'git commit -am "b"', agentId: 'a1' } as any)
 	await clock.settle()
-	expect(ran.some(argv => argv[0] === 'git')).toBe(false)
-	await $.tool.call({ tool: 'Bash', command: 'git commit -am x', agentId: 'a1' } as any)
-	await clock.settle()
-	expect(ran.some(argv => argv.includes('status'))).toBe(false)
+	expect(ran.some(argv => argv.join(' ').startsWith(`${GIT} ${worktree} status`))).toBe(true)
+	// Never checked against the main checkout.
+	expect(ran.some(argv => argv.join(' ').startsWith(`${GIT} /repo status`))).toBe(false)
 	const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
 	await pane.press({ key: 'files-a1' })
 	const files = await $.ui.mount({ ...FILES, surface: 'desktop' })
-	expect((await files.find({ key: 'state-/repo/a.js' }))?.text).toBe('edited')
+	expect((await files.find({ key: `state-${worktree}/b.js` }))?.text).toBe('committed')
+	expect((await files.find({ type: 'Text', text: /^committed f00ba47$/ }))?.text).toBe('committed f00ba47')
+	await files.unmount()
+	await pane.unmount()
+})
+
+test('a file the agent wrote and deleted without committing never shows as committed', async ($, on) => {
+	const { clock, ran } = await start($, on, {
+		stdout: {
+			[`${GIT} /repo rev-parse --show-cdup`]: '\n',
+			// git lists nothing for either file: one is committed, the other is gone and was never tracked.
+			[`${GIT} /repo status`]: '',
+			[`${GIT} /repo ls-files`]: 'kept.js\0',
+			[`${GIT} /repo rev-parse --short HEAD`]: 'c0ffee1\n'
+		}
+	})
+	await $.tool.call(edit('/repo/kept.js', 'a1'))
+	await $.tool.call({ tool: 'Write', file_path: '/repo/probe.js', content: 'x', agentId: 'a1' } as any)
+	await $.tool.call({ tool: 'Bash', command: 'git commit -am kept', agentId: 'a1' } as any)
+	await clock.settle()
+	expect(ran).toContainEqual(['git', '--no-optional-locks', '-C', '/repo', 'ls-files', '-z', '--full-name', '--', '/repo/kept.js', '/repo/probe.js'])
+	const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	await pane.press({ key: 'files-a1' })
+	const files = await $.ui.mount({ ...FILES, surface: 'desktop' })
+	expect((await files.find({ key: 'state-/repo/kept.js' }))?.text).toBe('committed')
+	expect((await files.find({ key: 'state-/repo/probe.js' }))?.text).toBe('edited')
+	await files.unmount()
+	await pane.unmount()
+})
+
+test('no check, a failed check or nothing clean leaves the files edited and stamps no SHA', async ($, on) => {
+	const { clock, ran } = await start($, on, {
+		stdout: {
+			[`${GIT} /repo/src rev-parse --show-cdup`]: '../\n',
+			// Still dirty after the commit, and its new sibling ignored.
+			[`${GIT} /repo status`]: ' M src/a.js\0!! src/dist.js\0'
+		},
+		exits: { [`${GIT} /elsewhere rev-parse`]: 128 }
+	})
+	await $.tool.call(edit('/repo/src/a.js', 'a1'))
+	await $.tool.call({ tool: 'Write', file_path: '/repo/src/dist.js', content: 'x', agentId: 'a1' } as any)
+	await $.tool.call({ tool: 'Bash', command: 'git log --grep commit', agentId: 'a1' } as any)
+	await $.tool.call({ tool: 'Bash', command: 'git commit -am x', run_in_background: true, agentId: 'a1' } as any)
+	await clock.settle()
+	// Neither command is a finished commit, so git was never asked.
+	expect(ran.some(argv => argv[0] === 'git')).toBe(false)
+	await $.tool.call({ tool: 'Bash', command: 'git commit -am x', agentId: 'a1' } as any)
+	await clock.settle()
+	// Checked, but nothing turned clean: no HEAD lookup.
+	expect(ran.some(argv => argv.join(' ').startsWith(`${GIT} /repo status`))).toBe(true)
+	expect(ran.some(argv => argv.includes('HEAD'))).toBe(false)
+	// An agent whose files sit outside any repository is never asked for a status.
+	await $.tool.call(edit('/elsewhere/c.js', 'a2'))
+	await $.tool.call({ tool: 'Bash', command: 'git commit -am y', agentId: 'a2' } as any)
+	await clock.settle()
+	expect(ran.some(argv => argv.join(' ').startsWith(`${GIT} /elsewhere status`))).toBe(false)
+	const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	await pane.press({ key: 'files-a1' })
+	const files = await $.ui.mount({ ...FILES, surface: 'desktop' })
+	expect((await files.find({ key: 'state-/repo/src/a.js' }))?.text).toBe('edited')
+	expect((await files.find({ key: 'state-/repo/src/dist.js' }))?.text).toBe('edited')
 	expect(await files.find({ type: 'Text', text: /^committed / })).toBeUndefined()
 	await files.unmount()
 	await pane.unmount()
 })
 ```
 
-- [ ] **Step 2: Run them**
+- [ ] **Step 2: Add the tracked-only rule, then run the tests**
+
+In `hooks/register.tsx`'s `checkCommit`, inside the per-top loop and after the clean paths are known: if any are clean, run `ls-files -z --full-name -- <clean paths>` in that top. Narrow clean to the listed ones (`stdout.split('\0').filter(Boolean).map(path => `${top}/${path}`)`), and skip the top if the call fails. Then run `rev-parse --short HEAD` only if clean is still non-empty. Add a short why-comment.
 
 Run: `scripts/test-one.sh files-pane.test.ts`
-Expected: PASS, 11 tests.
+Expected: PASS, every test in the file.
 
-If the commit test fails because the git check hadn't finished, `clock.settle()` may not flush the fire-and-forget promise. Replace that `await clock.settle()` with `for (let i = 0; i < 5; i++) await clock.settle()`. If that still fails, use `await new Promise(resolve => setTimeout(resolve, 0))` repeated five times. Don't make the check blocking: the spec requires it to run after the tool result.
+If the commit tests fail because the git check hadn't finished, `clock.settle()` may not flush the fire-and-forget promise. Replace that `await clock.settle()` with `for (let i = 0; i < 5; i++) await clock.settle()`. If that still fails, use `await new Promise(resolve => setTimeout(resolve, 0))` repeated five times. Don't make the check blocking: the spec requires it to run after the tool result.
+
+If a test fails because the behaviour under test is wrong (not the test's plumbing), fix the code in `hooks/register.tsx` or `hooks/files-pane.tsx` and report it.
 
 - [ ] **Step 3: Commit**
 
