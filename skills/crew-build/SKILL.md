@@ -27,6 +27,7 @@ Copy this checklist into the task list and tick it off as you go:
 - [ ] Worktrees removed once the work is done, their servers stopped, branches kept locally
 - [ ] Tests run in small chunks, one run at a time, never the whole heavy suite at once
 - [ ] Every sub-agent prompt asks for a task list it ticks off as it goes
+- [ ] Every implementer prompt has it invoke the `ponytail` skill before it starts coding
 
 Rules for each stage:
 
@@ -35,7 +36,16 @@ Rules for each stage:
 - **Worktrees.** Create or confirm the worktree before the first implementer runs. Never build on `main`/`master` without the user's explicit consent.
   - **Ask for the base branch first, every time.** Before creating a worktree, ask the user which branch to base it on, with AskUserQuestion. Offer the current branch and the repository's default branch, plus any branch the conversation has named. Never pick one yourself, even when only one seems likely. Reusing an existing worktree needs no question.
   - The per-implementer worktrees in a parallel wave (below) are cut from the feature branch the user already chose, so they don't need the question again.
-- **Subagent-driven development.** One implementer per task, then spec review, then quality review. Keep sub-agents on that skill's prompt templates. Run independent tasks in parallel, as described below.
+- **Subagent-driven development.** One implementer per task, then spec review, then quality review. Keep sub-agents on that skill's prompt templates. Run independent tasks in parallel, as described below. Every implementer runs the `ponytail` skill first (see "Implementers start with ponytail" below).
+
+## Implementers start with ponytail
+
+Every implementer sub-agent invokes the `ponytail` skill before it writes or changes any code, so it builds the smallest change that fully does its task. That covers the first implementer of a task, any fix-up implementer sent back after a review, and every implementer in a parallel wave.
+
+- **Put it in the prompt yourself**, near the top, as the implementer's first step after writing its task list: "Before you write any code, invoke the `ponytail` skill with the Skill tool and follow it for this task." Make it the first step in the task list you ask for, so the step shows on the agent's card.
+- **The plan still sets the scope.** Ponytail trims how the task is built, never what it must do. The task's requirements, its tests and the spec reviewer's checks stand. If ponytail and the plan disagree about what to build, the plan wins, and the implementer reports the disagreement in its summary.
+- **If the skill isn't there.** If `ponytail` isn't among the sub-agent's skills, it says so in one line of its report and carries on. Don't stop the run for it.
+- Reviewers don't need it: they read, they don't code.
 
 ## Run independent sub-agents in parallel
 
