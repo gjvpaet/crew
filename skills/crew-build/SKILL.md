@@ -136,7 +136,7 @@ Once the work is done (finishing-a-development-branch has run and every change i
 1. Run `git -C <worktree> status --porcelain`. If anything is uncommitted, stop and ask the user. Never pass `--force`.
 2. **Stop the servers running from it.** That means API and front-end dev servers, watchers, and anything else whose working folder is inside the worktree. Find them with:
    ```bash
-   lsof -a -d cwd -F pn 2>/dev/null | awk '/^p/{p=substr($0,2)} /^n/{print p" "substr($0,2)}' | grep -F " <worktree>"
+   lsof -a -d cwd -F pn 2>/dev/null | awk '/^p/{p=substr($ 0,2)} /^n/{print p" "substr($ 0,2)}' | grep -F " <worktree>"
    ```
    - **How to stop them.** One you started through a tool goes down with that tool: `stop_terminal_tab` for a Terminal tab, `preview_stop` for a preview server, `TaskStop` for a background shell. The rest get `kill <pid>`, every listed PID, children included. Use `kill -9` only for one still running a few seconds later.
    - **Only these servers.** Never stop servers running from the main checkout or another worktree, or shared services such as a database or Redis container.
