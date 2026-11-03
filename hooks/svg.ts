@@ -378,7 +378,7 @@ const textEms = (text: string) =>
 	Array.from(text).reduce((sum, ch) => {
 		if (NARROW.has(ch)) return sum + 0.3
 		if (WIDE.has(ch)) return sum + 0.86
-		if (ch === 'f' || ch === 't' || ch === 'r') return sum + 0.4
+		if (ch === 'f' || ch === 't' || ch === 'r' || ch === '-') return sum + 0.4
 		return sum + (ch >= 'A' && ch <= 'Z' ? 0.66 : 0.56)
 	}, 0)
 

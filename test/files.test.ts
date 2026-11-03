@@ -20,7 +20,8 @@ import {
 	shineColors,
 	touchOf,
 	touchedRows,
-	chipOf
+	chipOf,
+	clipName
 } from '../hooks/files'
 import { EMPTY_STATE, reduce, type CrewEvent } from '../hooks/tracker'
 import { panelView } from '../hooks/view'
@@ -497,4 +498,13 @@ test('numstat reads added and removed counts by path, a binary file as 0 and 0',
 
 test('numstat takes a rename’s new path, which -z prints after an empty name and the old path', () => {
 	expect(numstat('0\t0\t\0old.js\0new.js\0' + '5\t1\tz.js\0')).toEqual({ 'new.js': [0, 0], 'z.js': [5, 1] })
+})
+
+test('a long name is shortened in the middle, keeping its end and extension', () => {
+	const long = '2026-11-03-post-mui-font-and-sidebar-icon-design.md'
+	const clipped = clipName(long, 28)
+	expect(Array.from(clipped)).toHaveLength(28)
+	expect(clipped).toBe('2026-11-03-post-m\u2026-design.md')
+	expect(clipName('PriceTable.jsx', 28)).toBe('PriceTable.jsx')
+	expect(clipName('abcdefghij', 5)).toBe('ab\u2026ij')
 })

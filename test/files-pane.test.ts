@@ -292,6 +292,23 @@ test('on Desktop only the live name shines, as an SVG, and its folder shows the 
 	await pane.unmount()
 })
 
+test('a long live name is shortened so its folder and pill stay in the row', async ($, on) => {
+	await start($, on)
+	const path = '/repo/docs/specs/2026-11-03-post-mui-font-and-sidebar-icon-design.md'
+	await $.tool.call(edit(path, 'a1'))
+	const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	await pane.press({ key: 'files-a1' })
+	const files = await $.ui.mount({ ...FILES, surface: 'desktop' })
+	const [shine] = await nameCell(files, path)
+	// The drawing says the shortened name; its alt still names the whole file.
+	expect(shine.props.alt).toBe('2026-11-03-post-mui-font-and-sidebar-icon-design.md')
+	expect(shine.props.source).toContain('>2026-11-03-po\u2026-design.md</text>')
+	expect(shine.props.width).toBeLessThan(200)
+	expect((await files.find({ key: `file:${path}` }))?.children[1].props.overflow).toBe('hidden')
+	await files.unmount()
+	await pane.unmount()
+})
+
 test('in the terminal the live name is coloured letter by letter, the band moving with the clock', async ($, on) => {
 	const { clock } = await start($, on)
 	await $.tool.call(read('/repo/a.js', 'a1'))

@@ -293,6 +293,15 @@ export function rightNow(
 	}
 }
 
+// A long name shortened in the middle, its end (and so its extension) kept: the live name is drawn as an SVG of its own
+// width, which no row can squeeze, so a long one would push the folder and the pill out of the row.
+export function clipName(name: string, max: number): string {
+	const letters = Array.from(name)
+	if (letters.length <= max) return name
+	const tail = Math.min(10, Math.floor((max - 1) / 2))
+	return `${letters.slice(0, max - 1 - tail).join('')}\u2026${letters.slice(-tail).join('')}`
+}
+
 // How often the terminal shine's band moves a letter: the rate the ticker redraws while an agent runs, so the band
 // steps once per redraw and never skips a letter. register.tsx beats to it.
 export const SHINE_STEP_MS = 200

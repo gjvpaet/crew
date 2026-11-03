@@ -3,6 +3,7 @@ import type { EngineInterface, On } from 'claude-code'
 
 import type { CrewState, FileState } from '../types'
 import {
+	clipName,
 	latestOf,
 	openCommand,
 	posix,
@@ -68,6 +69,8 @@ const PILLS: Record<FileState, { fill: string; color: string; live: string }> = 
 // The live row's fill: its state colour, faint, over the card.
 const LIVE_FILLS: Record<FileState, string> = { read: '#2B2238', edited: '#3A2617', committed: '#1C3021' }
 const NAME_PX = 14
+// Past this many letters the live name is shortened in the middle, so it leaves room for its folder and pill.
+const SHINE_MAX_LETTERS = 24
 
 const ICON_PX = 40
 const BRANCH_PX = 14
@@ -274,7 +277,7 @@ export function registerFilesPane(on: On) {
 					folderText(row)
 				]
 			if (Svg) {
-				const shine = shineSvg(row.name, base, { fontSize: NAME_PX, weight: 500 })
+				const shine = shineSvg(clipName(row.name, SHINE_MAX_LETTERS), base, { fontSize: NAME_PX, weight: 500 })
 				// An SVG cannot sit in a Button, so the live row is pressed by its folder, which shows the file in it. Desktop
 				// draws a Button's label rather than its children, so the label is the folder too.
 				return [
@@ -330,8 +333,9 @@ export function registerFilesPane(on: On) {
 					: { paddingX: 1 })}
 			>
 				{chip(row)}
-				{/* width 0 + flexGrow 1: the name and folder take what the chip, counts and pill leave. */}
-				<Box key="name" flexDirection="row" gap={1} flexGrow={1} width={0} alignItems="center">
+				{/* width 0 + flexGrow 1: the name and folder take what the chip, counts and pill leave; hidden overflow keeps a
+				    name too long for them off the pill. */}
+				<Box key="name" flexDirection="row" gap={1} flexGrow={1} width={0} alignItems="center" overflow="hidden">
 					{nameParts(row)}
 				</Box>
 				{counts(row.added, row.removed, 'footnote')}
