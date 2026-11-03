@@ -38,6 +38,15 @@ test('a command shows what it runs, not its cd hops or env vars', async () => {
 	expect(bash('curl X=1')).toBe('Running curl')
 })
 
+test('a long line of quoted assignments does not backtrack', async () => {
+	const start = Date.now()
+	const long = 'export ' + Array.from({ length: 40 }, (_, i) => `V${i}="x"`).join(' ')
+	expect(actionText('Bash', { command: long })).toBe('Running export')
+	expect(Date.now() - start).toBeLessThan(50)
+	expect(actionText('Bash', { command: 'FOO= bun test' })).toBe('Running bun test')
+	expect(actionText('Bash', { command: 'A="x y" make' })).toBe('Running make')
+})
+
 test('the text is capped at 120 characters', async () => {
 	expect(actionText('Grep', { pattern: 'x'.repeat(300) })!.length).toBeLessThanOrEqual(120)
 })

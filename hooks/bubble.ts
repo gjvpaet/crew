@@ -28,7 +28,8 @@ const say = (verb: string, subject: string) => (subject ? `${verb} ${subject}` :
 const QUIET = new Set(['TaskList', 'TaskGet'])
 // A leading setup hop (`cd`, `source`, `.`, `nvm use`, `export`/`env` assignments, `NAME=value`): where or how a command ran, and possibly a secret.
 const ARG = String.raw`(?:"[^"]*"|'[^']*'|\S+)`
-const ASSIGN = String.raw`[A-Za-z_]\w*=(?:"[^"]*"|'[^']*'|\S*)`
+// The value alternatives must not overlap, or a long line of quoted assignments backtracks exponentially.
+const ASSIGN = String.raw`[A-Za-z_]\w*=(?:"[^"]*"|'[^']*'|[^\s"']\S*)?`
 const HOP = String.raw`\s*(?:&&|;)\s*`
 const LEAD = new RegExp(
 	String.raw`^\s*(?:(?:cd|source|\.|nvm\s+use)\s+${ARG}${HOP}|(?:export|env)(?:\s+${ASSIGN})+${HOP}|env(?:\s+${ASSIGN})+\s+|${ASSIGN}\s+)`
