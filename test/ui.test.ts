@@ -99,6 +99,22 @@ test('on desktop the band draws its bar, pill and a mini Pip as SVG', async ($, 
 	await ui.unmount()
 })
 
+test('once every sub-agent has finished but Main still works, the band shows Main at work, with no goal flag', async ($, on) => {
+	await startTwoAgents($, on)
+	for (const agentId of ['a1', 'a2'])
+		await $.turn.complete({ turnId: 's', agentId, answer: 'x', durationMs: 1, isAborted: false, reason: 'answer' } as any)
+	const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+	expect((await ui.find({ type: 'Text', text: /running/ }))?.text).toBe('0 running')
+	const [pip] = await svgs(ui, /mascot/)
+	expect(pip?.props.alt).toBe('Pip the main agent mascot, running')
+	expect(String(pip?.props.source)).not.toContain('class="flag"')
+	// Main's turn ends: now the crew is done, and the flag goes up.
+	await $.turn.complete({ turnId: 't1', answer: 'x', durationMs: 1, isAborted: false, reason: 'answer' } as any)
+	const [done] = await svgs(ui, /mascot/)
+	expect(String(done?.props.source)).toContain('class="flag"')
+	await ui.unmount()
+})
+
 test('on desktop each band SVG centres itself rather than resting on the text baseline', async ($, on) => {
 	await startTwoAgents($, on)
 	const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })

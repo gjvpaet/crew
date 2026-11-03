@@ -60,9 +60,10 @@ export function registerBand(on: On, onViewport: (isFullscreen: boolean) => void
 			const isSweeping = isPulsing(state)
 			const from = slideFrom(progress.fraction, await $.clock.now())
 			const main = state.agents[MAIN]
-			// With no sub-agent, Main is the one at work: its own Pip, moving while its turn runs.
+			// With no sub-agent at work, Main is the one at work: its own Pip, moving while its turn runs. Until Main's
+			// turn ends, the crew's Pip would otherwise raise its finished flag too early.
 			const mainPose = main?.status === 'running' ? 'running' : FAILED.has(main?.status ?? 'completed') ? 'stopped' : 'still'
-			const mini = line.runningLabel
+			const mini = line.runningLabel && (isAnyRunning || mainPose !== 'running')
 				? {
 						source: pipSvg('developer', prefs, MINI_PIP_PX, { pose: isAnyRunning ? 'running' : 'still' }),
 						alt: 'developer mascot',
