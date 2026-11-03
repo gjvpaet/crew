@@ -2,9 +2,10 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 
 import type { MascotPrefs } from '../types'
+import { clipName } from './files'
 import { showFiles } from './files-pane'
 import type { Species, SpriteCell } from './sprite'
-import { barSvg, pipHeight, pipSvg, pipWidth } from './svg'
+import { barSvg, bubbleSvg, pipHeight, pipSvg, pipWidth } from './svg'
 import { EMPTY_STATE } from './tracker'
 import {
 	MOVE_MS,
@@ -55,8 +56,13 @@ const COST = {
 	card: { chars: 900, nodes: 30 },
 	line: { chars: 200, nodes: 10 },
 	planned: { chars: 300, nodes: 8 },
-	group: { chars: 120, nodes: 4 }
+	group: { chars: 120, nodes: 4 },
+	bubble: { nodes: 3 }
 }
+// Past this many letters a bubble's drawing is shortened in the middle; its alt keeps the whole text.
+const BUBBLE_LETTERS = 28
+// Past this many, cards drop their bubble: a few hundred would push the terminal past its 20,000-node ceiling.
+const MAX_BUBBLES = 24
 // A card's frame, its padding, the 8-cell sprite and the gap after it, and the side column with the time and its
 // mark (`12:34 ✗ stopped` at most) and the gap before it: what the terminal's text bar leaves to the rest.
 const CARD_CHROME = 13
@@ -192,6 +198,24 @@ export function registerPanel(on: On) {
 				</Text>
 			)
 
+		// The bubble over Pip: an SVG where the surface draws one, a dim line in the terminal.
+		const bubbleArt = (row: RowView) =>
+			Svg && row.bubble ? bubbleSvg(clipName(row.bubble, BUBBLE_LETTERS), row.bubbleTone) : undefined
+		const bubbleRow = (row: RowView) => {
+			const art = bubbleArt(row)
+			return (
+				<Box key={`bubble-${row.id}`} flexDirection="row">
+					{art && Svg ? (
+						<Svg source={art.source} alt={row.bubble} width={art.width} height={art.height} />
+					) : (
+						<Text wrap="truncate-end" {...(row.bubbleTone === 'done' ? { color: TONE.done } : { dimColor: true })}>
+							{`▸ ${row.bubble}`}
+						</Text>
+					)}
+				</Box>
+			)
+		}
+
 		const agentCard = (row: RowView) => {
 			const arrival = motion.arrivals[row.id]
 			// Just moved here: lit in its accent and sliding in from the right. Otherwise a running card's border breathes
@@ -201,19 +225,10 @@ export function registerPanel(on: On) {
 				: row.pulse === null
 					? {}
 					: { borderColor: pulseColor(row.accent, row.pulse, Svg ? 'graphical' : 'terminal') }
-			return (
-			<Box
-				key={`row-${row.id}`}
-				flexDirection="row"
-				gap={1}
-				borderStyle="round"
-				{...border}
-				paddingX={1}
-				marginBottom={1}
-				marginLeft={arrival?.slide ?? 0}
-			>
-				{mascot(row)}
-				{/* width 0 + flexGrow 1: the text column takes what the mascot and the side column leave, and no more. */}
+			const frame = { borderStyle: 'round', ...border, paddingX: 1, marginBottom: 1, marginLeft: arrival?.slide ?? 0 } as const
+			const parts = [
+				mascot(row),
+				// width 0 + flexGrow 1: the text column takes what the mascot and the side column leave, and no more.
 				<Box flexDirection="column" flexGrow={1} width={0}>
 					<Box flexDirection="row" gap={1}>
 						{/* The title gives way first; Main's waiting note keeps its width beside it. */}
@@ -244,16 +259,32 @@ export function registerPanel(on: On) {
 					</Text>
 					{row.steps && <Text wrap="truncate-end">{row.steps}</Text>}
 					{progress(row)}
-				</Box>
-				{/* The time and its mark in a column of their own, so the text column (and the bar) end where it begins. */}
+				</Box>,
+				// The time and its mark in a column of their own, so the text column (and the bar) end where it begins.
 				<Box flexDirection="row" gap={1} flexShrink={0}>
 					<Text dimColor tabular>
 						{row.elapsed}
 					</Text>
 					{row.badge && <Text color={TONE[row.tone]}>{row.badge}</Text>}
 				</Box>
-			</Box>
-		)
+			]
+			// With a bubble the card stacks it over its usual row, so it sits on Pip's head; without one it is that row.
+			return row.bubble ? (
+				<Box key={`row-${row.id}`} flexDirection="column" {...frame}>
+					{bubbleRow(row)}
+					<Box flexDirection="row" gap={1}>
+						{parts[0]}
+						{parts[1]}
+						{parts[2]}
+					</Box>
+				</Box>
+			) : (
+				<Box key={`row-${row.id}`} flexDirection="row" gap={1} {...frame}>
+					{parts[0]}
+					{parts[1]}
+					{parts[2]}
+				</Box>
+			)
 		}
 
 		// One line in place of a card once the budget is spent: the agent's colour, title, time and mark.
@@ -277,6 +308,7 @@ export function registerPanel(on: On) {
 		// limit, so only a surface drawing SVG is held to it.
 		type Cost = { chars: number; nodes: number }
 		const spent: Cost = { ...COST.header }
+		let bubbles = 0
 		const spend = (cost: Cost, ceiling = DRAW_BUDGET.chars) => {
 			const fits = !Svg || (spent.chars + cost.chars <= ceiling && spent.nodes + cost.nodes <= DRAW_BUDGET.nodes)
 			if (fits) Object.assign(spent, { chars: spent.chars + cost.chars, nodes: spent.nodes + cost.nodes })
@@ -285,11 +317,21 @@ export function registerPanel(on: On) {
 		const cardCost = (row: RowView): Cost => {
 			const svg = Svg ? sourcesOf(row) : { mascot: '', bar: '' }
 			const text = row.title.length + row.steps.length + row.usageText.length
-			return { chars: COST.card.chars + svg.mascot.length + svg.bar.length + text, nodes: COST.card.nodes }
+			const bubble = bubbleArt(row)
+			return {
+				chars:
+					COST.card.chars + svg.mascot.length + svg.bar.length + text + (bubble ? bubble.source.length + row.bubble.length : 0),
+				nodes: COST.card.nodes + (row.bubble ? COST.bubble.nodes : 0)
+			}
 		}
 		// A card while it fits, a line once it does not, and nothing once even a line does not.
-		const drawRow = (row: RowView) => {
-			if (spend(cardCost(row), DRAW_BUDGET.cardChars)) return agentCard(row)
+		const drawRow = (full: RowView) => {
+			// Main's card is drawn outside this, so its bubble is never dropped and not counted.
+			const row = full.bubble && bubbles >= MAX_BUBBLES ? { ...full, bubble: '' } : full
+			if (spend(cardCost(row), DRAW_BUDGET.cardChars)) {
+				if (row.bubble) bubbles++
+				return agentCard(row)
+			}
 			return spend({ chars: COST.line.chars + row.title.length, nodes: COST.line.nodes }) ? lineRow(row) : null
 		}
 		// A group's rows as the budget allows, with a count of any it had to leave out.
