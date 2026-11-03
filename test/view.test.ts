@@ -522,3 +522,18 @@ test('a stopped agent shows a gentle line', async () => {
 	expect(row?.bubble).toBe(phraseFor('a2', 'stopped'))
 	expect(row?.bubbleTone).toBe('stopped')
 })
+
+test('Main says its phrase by turn; waiting on agents, or a waiting agent, says nothing', async () => {
+	// Main's turn ends at 21_000 while a2 and a3 still run.
+	const mainDone = reduce(STATE, { kind: 'turnEnd', at: 21_000, isAborted: false, reason: 'answer' })
+	expect(rowIn(panelView(mainDone, {}, 22_000, 20, {}), 'main')?.bubble).toBe('')
+	const finished = reduce(mainDone, {
+		kind: 'statuses',
+		at: 21_500,
+		list: [{ id: 'a2', status: 'completed' }, { id: 'a3', status: 'completed' }]
+	})
+	const mainRow = rowIn(panelView(finished, {}, 22_000, 20, {}), 'main')
+	expect(mainRow?.bubble).toBe(phraseFor('t1', 'done'))
+	const paused = reduce(STATE, { kind: 'statuses', at: 21_000, list: [{ id: 'a2', status: 'waiting' }] })
+	expect(rowIn(panelView(paused, {}, 22_000, 20, {}), 'a2')?.bubble).toBe('')
+})

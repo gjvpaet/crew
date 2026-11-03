@@ -195,12 +195,19 @@ const POSES: Record<Tone, Pose> = { running: 'running', waiting: 'paused', done:
 
 export type PanelOptions = { sprites?: boolean; filesFor?: string | null }
 
-// A sleeping or waiting agent says nothing: its zzz already speaks for it.
-function bubbleOf(agent: AgentRecord, tone: Tone, endedAt: number | undefined, now: number): { text: string; tone: BubbleTone } {
+// What Pip says: its latest action while it runs, a phrase for BUBBLE_MS once it ends, nothing while it waits (its zzz speaks for it).
+function bubbleOf(
+	agent: AgentRecord,
+	tone: Tone,
+	endedAt: number | undefined,
+	now: number,
+	phraseKey: string
+): { text: string; tone: BubbleTone } {
 	if (tone === 'running') return { text: agent.action ?? '', tone: 'running' }
-	const isFresh = endedAt !== undefined && now - endedAt < BUBBLE_MS
-	if (isFresh && tone === 'done') return { text: phraseFor(agent.id, 'done'), tone: 'done' }
-	if (isFresh && tone === 'failed') return { text: phraseFor(agent.id, 'stopped'), tone: 'stopped' }
+	const age = endedAt === undefined ? -1 : now - endedAt
+	const isFresh = age >= 0 && age < BUBBLE_MS
+	if (isFresh && tone === 'done') return { text: phraseFor(phraseKey, 'done'), tone: 'done' }
+	if (isFresh && tone === 'failed') return { text: phraseFor(phraseKey, 'stopped'), tone: 'stopped' }
 	return { text: '', tone: 'running' }
 }
 
@@ -236,7 +243,7 @@ function rowView(
 	const accent = accentOf(agent, state)
 	const species = speciesOf(agent, state)
 	const pose = POSES[tone]
-	const bubble = bubbleOf(agent, tone, endedAt, now)
+	const bubble = bubbleOf(agent, tone, endedAt, now, agent.id === MAIN ? (state.turn?.id ?? MAIN) : agent.id)
 	return {
 		id: agent.id,
 		title: agent.description,

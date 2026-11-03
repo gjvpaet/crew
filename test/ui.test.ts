@@ -443,15 +443,13 @@ test('a failing Crew hook never fails a tool call, a spawn or a step', async ($,
 	const ran = await $.tool.call({ tool: 'Bash', command: 'ls' } as any)
 	expect(ran.deny).toBeUndefined()
 	expect(ran.result).toEqual({ ok: true })
-	// The tool call's own action write needs no clock, so it lands; only the spawn and the step are held back.
-	const writesAfterCall = seen.modelWrites
 	const spawned = await $.agent.spawn({ prompt: 'go', description: 'Research', subagentType: 'Explore' })
 	expect(spawned.agentId).toBe('a1')
 	expect(seen.spawns).toBe(1)
 	const stepped = await drain($.turn.step({ turnId: 's1', index: 0, model: 'claude-opus-5-5', messageCount: 1, agentId: 'a1' } as any))
 	expect(stepped.usage).toEqual(USAGE)
 	// The failure was real: none of Crew's bookkeeping for the spawn or the step landed.
-	expect(seen.modelWrites).toBe(writesAfterCall)
+	expect(seen.modelWrites).toBe(0)
 })
 
 test('mascot prefs load from the store at the start of each main turn, sanitised', async ($, on) => {

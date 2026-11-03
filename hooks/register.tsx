@@ -67,6 +67,9 @@ const toolInput = (e: object): Record<string, unknown> =>
 	Object.fromEntries(Object.entries(e).filter(([key]) => !RESERVED.has(key)))
 
 async function apply($: EngineInterface, ev: CrewEvent) {
+	// A no-op event (the same action again, an unknown agent) writes nothing and so redraws nothing.
+	const current = await read($, model)
+	if (reduce(current, ev) === current) return
 	await update($, model, state => reduce(state, ev))
 }
 
