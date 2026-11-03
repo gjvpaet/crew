@@ -9,6 +9,34 @@ export const WRAP_UP_TOOL = 'mcp__ccd_turn__wrap_up'
 
 export const TASK_TOOLS = new Set(['TodoWrite', 'TaskCreate', 'TaskUpdate', PLAN_TOOL, WRAP_UP_TOOL])
 
+// Crew's own step list, for an agent with no task-list tool: in the desktop app a sub-agent has no TodoWrite or
+// TaskCreate, and the app refuses its update_plan.
+export const SET_STEPS_TOOL = 'mcp__crew__set_steps'
+export const SET_STEPS_SPEC = {
+	name: 'set_steps',
+	description:
+		'Report your steps to the Crew Agents panel when you have no task-list tool (no TodoWrite or TaskCreate). Send the whole list each time, with each step pending, in_progress or completed; keep one in progress.',
+	inputSchema: {
+		type: 'object',
+		properties: {
+			steps: {
+				type: 'array',
+				items: {
+					type: 'object',
+					properties: {
+						title: { type: 'string' },
+						status: { type: 'string', enum: ['pending', 'in_progress', 'completed'] }
+					},
+					required: ['title', 'status'],
+					additionalProperties: false
+				}
+			}
+		},
+		required: ['steps'],
+		additionalProperties: false
+	}
+}
+
 type Status = TaskItem['status']
 
 const asStatus = (value: unknown): Status =>
@@ -24,6 +52,14 @@ function fromTodoWrite(input: Record<string, unknown>): TaskItem[] {
 		id: String(index),
 		title: asText(todo.content),
 		status: asStatus(todo.status)
+	}))
+}
+
+function fromSteps(input: Record<string, unknown>): TaskItem[] {
+	return asList(input.steps).map((step, index) => ({
+		id: String(index),
+		title: asText(step.title),
+		status: asStatus(step.status)
 	}))
 }
 
@@ -83,6 +119,8 @@ export function applyTaskCall(list: readonly TaskItem[], call: TaskToolCall): Ta
 			return fromTaskUpdate(list, call.input)
 		case PLAN_TOOL:
 			return fromPlan(list, call.input)
+		case SET_STEPS_TOOL:
+			return fromSteps(call.input)
 		case WRAP_UP_TOOL:
 			return list.map(item => ({ ...item, status: 'completed' as const }))
 		default:

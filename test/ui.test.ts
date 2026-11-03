@@ -625,6 +625,8 @@ test('each sub-agent is asked to keep a task list Crew can show as its progress'
 	expect(prompts[0].startsWith('Write the parser.')).toBe(true)
 	expect(prompts[0]).toMatch(/task list/)
 	expect(prompts[0]).toMatch(/TodoWrite|TaskCreate/)
+	// Where it has no task-list tool (a sub-agent in the desktop app), it is pointed at Crew's own.
+	expect(prompts[0]).toMatch(/mcp__crew__set_steps/)
 	// Asked once, even when the prompt already carries the ask (a resume, say).
 	await $.agent.spawn({ prompt: prompts[0], description: 'Write the parser', subagentType: 'general-purpose' })
 	expect(prompts[1]).toBe(prompts[0])
@@ -649,6 +651,41 @@ test('the pane lists the planned steps under Planned, folding like the other gro
 	// The terminal lists them too, as text: no SVG there.
 	expect(await terminal.find({ type: 'Text', text: /3\. Write the plan/ })).toBeDefined()
 	await terminal.unmount()
+})
+
+test('a sub-agent with no task-list tool reports its steps through set_steps, and its card shows them', async ($, on) => {
+	const registered: string[] = []
+	mock.clock(on, { now: 1000 })
+	mock.store(on)
+	on('command.register', () => ({ value: { command: 'crew' } }))
+	on('tool.register', (_: unknown, e: any) => {
+		registered.push(e.name)
+		return { value: { tool: `mcp__crew__${e.name}` } }
+	})
+	on('ui.open', () => ({ value: { isPlaced: true } }))
+	on('ui.toast', () => ({ value: undefined }))
+	on('session.start', (_: unknown, e: any) => ({ cwd: e.cwd }))
+	on('turn.start', (_: unknown, e: any) => ({ turnId: e.turnId }))
+	on('agent.spawn', () => ({ model: 'claude-opus-5-5', agentId: 'a1' }))
+	on('ui.render', (_$: any, e: any) => {
+		const { Box } = _$.ui.resolve(e)
+		return h(Box, null)
+	})
+	await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+	expect(registered).toContain('set_steps')
+	await $.turn.start({ text: 'Build it', turnId: 't1' })
+	await $.agent.spawn({ prompt: 'go', description: 'Write the parser', subagentType: 'general-purpose' })
+	const steps = [
+		{ title: 'Read the spec', status: 'completed' },
+		{ title: 'Write the test', status: 'in_progress' },
+		{ title: 'Commit', status: 'pending' }
+	]
+	const ran = await $.tool.call({ tool: 'mcp__crew__set_steps', steps, agentId: 'a1' } as any)
+	// An MCP tool's result must be text.
+	expect(typeof ran.result).toBe('string')
+	const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	expect(await ui.find({ type: 'Text', text: /1\/3 · Write the test/ })).toBeDefined()
+	await ui.unmount()
 })
 
 test('Claude can open the Agents panel with the open_panel tool', async ($, on) => {

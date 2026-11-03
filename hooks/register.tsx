@@ -20,7 +20,7 @@ import {
 import { isFlashing, registerFilesPane } from './files-pane'
 import { SET_MASCOT_SPEC, SET_MASCOT_TOOL, applyMascotChange, parseMascotInput, sanitizeMascots } from './mascot'
 import { isMoving, openPane, registerPanel, syncPaneShown } from './panel'
-import { TASK_TOOLS } from './tasks'
+import { SET_STEPS_SPEC, SET_STEPS_TOOL, TASK_TOOLS } from './tasks'
 import { EMPTY_STATE, MAIN, isPulsing, isTicking, reduce, type CrewEvent } from './tracker'
 
 // The engine's scan follows state refs only through consts of the same file, so each file declares its own.
@@ -42,7 +42,8 @@ const BEATS_PER_PULSE = SHINE_STEP_MS / BEAT_MS
 // asked, after its task, to keep a short one: Crew reads it off the task-list tool calls as the agent's steps.
 const STEPS_NOTE =
 	'\n\n(Progress for the Crew panel: before you start, write your plan as a task list of 3 to 7 short steps with ' +
-	'your task-list tool (TodoWrite, or TaskCreate and TaskUpdate), then mark each step in progress and completed as you go.)'
+	'your task-list tool (TodoWrite, or TaskCreate and TaskUpdate), then mark each step in progress and completed as you go. ' +
+	'If you have no task-list tool, send the whole list to mcp__crew__set_steps instead, again each time a step changes.)'
 
 // A tool Claude can call to bring up the Agents pane, as /crew does for a person: a skill opens it as work begins.
 const OPEN_PANEL_TOOL = 'mcp__crew__open_panel'
@@ -382,6 +383,7 @@ export const register: Register = on => {
 		await $.command.register({ name: 'crew', description: 'Open the Crew agents panel' })
 		await $.tool.register(SET_MASCOT_SPEC)
 		await $.tool.register(OPEN_PANEL_SPEC)
+		await $.tool.register(SET_STEPS_SPEC)
 		await loadMascots($)
 		await syncPaneShown($)
 		// Another session may work in other folders, or one made a repository since.
@@ -492,6 +494,10 @@ export const register: Register = on => {
 			return { result: mascotSaved(parsed.role, prefs[parsed.role]) }
 		}
 		const input = toolInput(e)
+		if (tool === SET_STEPS_TOOL) {
+			await apply($, { kind: 'tasks', agentId: e.agentId, call: { tool, input } })
+			return { result: 'Steps recorded for the Crew panel.' }
+		}
 		// Before the call runs, so the bubble reads as what the agent is doing now.
 		const action = actionText(tool, input)
 		if (action) await apply($, { kind: 'action', agentId: e.agentId, text: action })

@@ -26,6 +26,22 @@ test('TodoWrite replaces the list', async () => {
 	expect(taskProgress(list ?? [])).toEqual({ done: 1, total: 3, current: 'Two' })
 })
 
+test('Crew\'s set_steps tool replaces the list, for agents with no task tools of their own', async () => {
+	const list = applyTaskCall([{ id: '0', title: 'Old', status: 'pending' }], {
+		tool: 'mcp__crew__set_steps',
+		input: {
+			steps: [
+				{ title: 'Read the spec', status: 'completed' },
+				{ title: 'Write the test', status: 'in_progress' },
+				{ title: 'Commit', status: 'pending' },
+				'not a step'
+			]
+		}
+	})
+	expect(list?.map(item => item.title)).toEqual(['Read the spec', 'Write the test', 'Commit'])
+	expect(taskProgress(list ?? [])).toEqual({ done: 1, total: 3, current: 'Write the test' })
+})
+
 test('TaskCreate appends with the id from the result, TaskUpdate changes or deletes', async () => {
 	const created = applyTaskCall([], {
 		tool: 'TaskCreate',
