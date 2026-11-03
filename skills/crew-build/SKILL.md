@@ -29,6 +29,7 @@ Copy this checklist into the task list and tick it off as you go:
 - [ ] Every sub-agent prompt asks for a task list it ticks off as it goes
 - [ ] Every implementer prompt has it invoke the `ponytail` skill before it starts coding
 - [ ] Architecture-wide questions go to graphify, small lookups to grep and Read; every sub-agent prompt says so
+- [ ] `i-have-adhd` followed by you from the start, and by every sub-agent before it starts; every sub-agent prompt says so
 
 Rules for each stage:
 
@@ -60,6 +61,16 @@ Every implementer sub-agent invokes the `ponytail` skill before it writes or cha
 - **The plan still sets the scope.** Ponytail trims how the task is built, never what it must do. The task's requirements, its tests and the spec reviewer's checks stand. If ponytail and the plan disagree about what to build, the plan wins, and the implementer reports the disagreement in its summary.
 - **If the skill isn't there.** If `ponytail` isn't among the sub-agent's skills, it says so in one line of its report and carries on. Don't stop the run for it.
 - Reviewers don't need it: they read, they don't code.
+
+## i-have-adhd: straight to the point
+
+The user wants every agent to get straight to the point. So you, and every sub-agent, follow the `i-have-adhd` skill: lead with the next action or the result, number steps, keep tangents out, and make wins visible.
+
+- **It can't be invoked with the Skill tool.** It is marked `disable-model-invocation`, so only the user can run `/i-have-adhd`. Read `~/.claude/skills/i-have-adhd/SKILL.md` instead, and follow it as if it had been invoked.
+- **You:** read it at the start of the run, before brainstorming, and follow it for every message to the user until the run ends.
+- **Every sub-agent:** put this in its prompt, as a first step next to its task list and ponytail: "Read `~/.claude/skills/i-have-adhd/SKILL.md` and follow it for your report." This covers implementers, reviewers, verifiers and any plan drafter. Their reports open with the status and the result, not the story.
+- **It shapes how things are said, never what gets done.** Specs, plans and reviews stay complete: no skipped tests, no dropped review findings, no plan steps without their code. The user's design questions still get asked, one at a time.
+- **If the file isn't there,** say so in one line and carry on.
 
 ## Graphify: architecture questions only
 
