@@ -38,6 +38,8 @@ export type AgentRecord = {
 	parentId?: string
 	spawnedAt: number
 	endedAt?: number
+	// What it is doing now, from its latest tool call, for the speech bubble on its card.
+	action?: string
 	usage: Usage
 	lastRequestInput: number
 	steps?: Steps

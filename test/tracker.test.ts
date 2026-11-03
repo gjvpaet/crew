@@ -557,3 +557,27 @@ test('git events work on state saved before line counts existed', () => {
 	const old = { turn: null, agents: {}, order: [], tasks: [], agentTasks: {}, sessionByModel: {} } as any
 	expect(reduce(old, git({ '/repo/a.js': [1, 0] }, { '/repo': { branch: null, changed: 1 } })).lines).toEqual({ '/repo/a.js': [1, 0] })
 })
+
+test('an action event keeps the agent’s latest action, and a later one replaces it', async () => {
+	const state = run([
+		{ kind: 'turnStart', at: 1000, turnId: 't1', text: 'Build it' },
+		spawn('a1', 'Implement Task 1'),
+		{ kind: 'action', agentId: 'a1', text: 'Reading band.tsx' },
+		{ kind: 'action', agentId: 'a1', text: 'Editing band.tsx' },
+		{ kind: 'action', text: 'Running bun test' }
+	])
+	expect(state.agents.a1?.action).toBe('Editing band.tsx')
+	expect(state.agents[MAIN]?.action).toBe('Running bun test')
+})
+
+test('an action for an agent not on the board changes nothing, and a new prompt starts Main without one', async () => {
+	const before = run([{ kind: 'turnStart', at: 1000, turnId: 't1', text: 'Build it' }])
+	expect(reduce(before, { kind: 'action', agentId: 'ghost', text: 'Reading x.ts' })).toBe(before)
+	const next = run([
+		{ kind: 'turnStart', at: 1000, turnId: 't1', text: 'Build it' },
+		{ kind: 'action', text: 'Reading x.ts' },
+		{ kind: 'turnEnd', at: 2000, isAborted: false, reason: 'answer' },
+		{ kind: 'turnStart', at: 3000, turnId: 't2', text: 'Next prompt' }
+	])
+	expect(next.agents[MAIN]?.action).toBeUndefined()
+})

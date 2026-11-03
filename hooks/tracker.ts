@@ -43,6 +43,7 @@ export type CrewEvent =
 	| { kind: 'tasks'; agentId?: string; call: TaskToolCall }
 	| { kind: 'statuses'; at: number; list: readonly ListedAgent[] }
 	| { kind: 'touch'; at: number; agentId?: string; path: string; touch: Touch }
+	| { kind: 'action'; agentId?: string; text: string }
 	| { kind: 'committed'; agentId?: string; at?: number; paths: string[]; sha?: string }
 	// What `git` just said about some files and repositories; a path at [0, 0] is clean and leaves `lines`.
 	| { kind: 'git'; lines: Record<string, [number, number]>; repos: Record<string, { branch: string | null; changed: number }> }
@@ -326,6 +327,12 @@ function applyGit(state: CrewState, ev: Extract<CrewEvent, { kind: 'git' }>): Cr
 	return lines === state.lines && repos === state.repos ? state : { ...state, lines, repos }
 }
 
+// An agent not on the board has no card for its bubble.
+function setAction(state: CrewState, ev: Extract<CrewEvent, { kind: 'action' }>): CrewState {
+	const agent = state.agents[ev.agentId ?? MAIN]
+	return agent && agent.action !== ev.text ? withAgent(state, { ...agent, action: ev.text }) : state
+}
+
 export function reduce(state: CrewState, ev: CrewEvent): CrewState {
 	// State saved by an older build may lack keys added since; a current one passes through as itself.
 	const isCurrent = Object.keys(EMPTY_STATE).every(key => key in state)
@@ -347,6 +354,8 @@ export function reduce(state: CrewState, ev: CrewEvent): CrewState {
 			return applyStatuses(s, ev)
 		case 'touch':
 			return addTouch(s, ev)
+		case 'action':
+			return setAction(s, ev)
 		case 'committed':
 			return markCommitted(s, ev)
 		case 'git':
