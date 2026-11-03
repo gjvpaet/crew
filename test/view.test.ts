@@ -223,6 +223,34 @@ test('the row fraction drives the bar: steps, done, shimmer, waiting', async () 
 	expect(running?.fraction).toBeNull()
 })
 
+test('a sub-agent that finished shows every step done, though it never ticked the last ones off', async () => {
+	const ticked = (ids: string[]) =>
+		ids.reduce(
+			(state, agentId) =>
+				reduce(state, {
+					kind: 'tasks',
+					agentId,
+					call: {
+						tool: 'TodoWrite',
+						input: {
+							todos: [
+								{ content: 'Write failing test', status: 'in_progress', activeForm: 'x' },
+								{ content: 'Make it pass', status: 'pending', activeForm: 'y' }
+							]
+						}
+					}
+				}),
+			STATE
+		)
+	const stopped = reduce(ticked(['a1', 'a2']), { kind: 'turnEnd', at: 21_000, agentId: 'a2', isAborted: true, reason: 'answer' })
+	const rows = panelView(stopped, {}, 30_000, 20, {}).groups.flatMap(group => group.rows)
+	const row = (id: string) => rows.find(each => each.id === id)
+	expect(row('a1')?.steps).toBe('2/2 · Make it pass')
+	expect(row('a1')?.fraction).toBe(1)
+	// A stopped agent did not finish its steps: its count stays as it was.
+	expect(row('a2')?.steps).toBe('0/2 · Write failing test')
+})
+
 test('Main waits on its running agents, then shows done', async () => {
 	const mainEnded = reduce(STATE, { kind: 'turnEnd', at: 21_000, isAborted: false, reason: 'answer' })
 	const waiting = panelView(mainEnded, {}, 30_000, 20, {}).main

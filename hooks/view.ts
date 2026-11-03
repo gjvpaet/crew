@@ -151,6 +151,15 @@ const selectBusy = (state: CrewState) => state.order.filter(id => BUSY.has(state
 // This prompt's own plan: one carried from an earlier prompt and not touched since is not shown.
 const planOf = (state: CrewState) => (state.tasks.length > 0 && !state.areTasksCarried ? state.tasks : [])
 
+// A sub-agent that finished cleanly did every step, though it often stops ticking them off before it ends.
+// Main is left alone: its turn can end mid-plan while it waits on the person.
+function finishedSteps(agent: AgentRecord, state: CrewState): Steps | undefined {
+	if (agent.id === MAIN || agent.status !== 'completed' || !agent.steps) return agent.steps
+	const list = state.agentTasks?.[agent.id] ?? []
+	if (list.length === 0) return { ...agent.steps, done: agent.steps.total }
+	return taskProgress(list.map(item => ({ ...item, status: 'completed' as const })))
+}
+
 function fractionOf(steps: Steps | undefined, tone: Tone, isMainWaiting: boolean): number | null {
 	if (steps && steps.total > 0) return steps.done / steps.total
 	if (tone === 'done' || tone === 'failed') return 1
@@ -229,7 +238,7 @@ function rowView(
 	const endedAt = agent.id === MAIN ? (state.turn?.endedAt ?? agent.endedAt) : agent.endedAt
 	// Main is the planner: its steps are the plan it keeps, when it keeps one this prompt.
 	const plan = agent.id === MAIN ? planOf(state) : []
-	const steps = plan.length > 0 ? taskProgress(plan) : agent.steps
+	const steps = plan.length > 0 ? taskProgress(plan) : finishedSteps(agent, state)
 	const parent = agent.parentId ? state.agents[agent.parentId] : undefined
 	const waitingNote = isMainWaiting ? `waiting on ${busy} agent${busy === 1 ? '' : 's'}` : ''
 	const asides = [parent ? `↳ from ${parent.description}` : ''].filter(Boolean)
