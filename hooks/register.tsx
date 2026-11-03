@@ -3,6 +3,7 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { AgentStatusView, MascotPrefs } from '../types'
 import { registerBand } from './band'
+import { actionText, isCheering } from './bubble'
 import {
 	SCAN_PRUNE,
 	SHINE_STEP_MS,
@@ -92,7 +93,7 @@ async function tick($: EngineInterface, beat: number) {
 	const isDue =
 		isMoving(now) ||
 		(beat % BEATS_PER_PULSE === 0 && (isPulsing(state) || (await isFlashDue()))) ||
-		(beat % BEATS_PER_SECOND === 0 && isTicking(state))
+		(beat % BEATS_PER_SECOND === 0 && (isTicking(state) || isCheering(state, now)))
 	if (isDue) $.ui.invalidate('ui.render')
 }
 
@@ -488,6 +489,9 @@ export const register: Register = on => {
 			return { result: mascotSaved(parsed.role, prefs[parsed.role]) }
 		}
 		const input = toolInput(e)
+		// Before the call runs, so the bubble reads as what the agent is doing now.
+		const action = actionText(tool, input)
+		if (action) await apply($, { kind: 'action', agentId: e.agentId, text: action })
 		const command = tool === 'Bash' && typeof input.command === 'string' ? input.command : undefined
 		// A background command has not finished when the call returns: its files and its HEAD are not settled yet.
 		const isForeground = command !== undefined && input.run_in_background !== true

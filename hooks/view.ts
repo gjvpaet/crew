@@ -1,8 +1,10 @@
 import type { AgentRecord, CrewState, MascotPrefs, Role, Steps } from '../types'
 import { bar, clamp, fmtDuration, fmtPercent, fmtTokens, fmtUsd, prettyModel, shimmer, truncate } from './format'
+import { BUBBLE_MS, phraseFor } from './bubble'
 import { estimateUsd } from './pricing'
 import { taskProgress } from './tasks'
 import { PALETTE, SPECIES_ORDER, spriteCells, type Pose, type Species, type SpriteCell } from './sprite'
+import type { BubbleTone } from './svg'
 import {
 	MAIN,
 	contextFraction,
@@ -104,6 +106,9 @@ export type RowView = {
 	// The mascot: its species (in the slot of its accent) and its pose, which only moves while it runs.
 	species: Species
 	pose: Pose
+	// The speech bubble over Pip: what it is doing while it runs, a phrase for a few seconds once it ends; '' for none.
+	bubble: string
+	bubbleTone: BubbleTone
 	// How far a running card's border has breathed toward its accent, 0 to PULSE.strength; null when it does not run.
 	pulse: number | null
 	// How many files the agent touched, and whether the Files pane shows them: the card's chevron.
@@ -190,6 +195,15 @@ const POSES: Record<Tone, Pose> = { running: 'running', waiting: 'paused', done:
 
 export type PanelOptions = { sprites?: boolean; filesFor?: string | null }
 
+// A sleeping or waiting agent says nothing: its zzz already speaks for it.
+function bubbleOf(agent: AgentRecord, tone: Tone, endedAt: number | undefined, now: number): { text: string; tone: BubbleTone } {
+	if (tone === 'running') return { text: agent.action ?? '', tone: 'running' }
+	const isFresh = endedAt !== undefined && now - endedAt < BUBBLE_MS
+	if (isFresh && tone === 'done') return { text: phraseFor(agent.id, 'done'), tone: 'done' }
+	if (isFresh && tone === 'failed') return { text: phraseFor(agent.id, 'stopped'), tone: 'stopped' }
+	return { text: '', tone: 'running' }
+}
+
 function rowView(
 	agent: AgentRecord,
 	state: CrewState,
@@ -222,6 +236,7 @@ function rowView(
 	const accent = accentOf(agent, state)
 	const species = speciesOf(agent, state)
 	const pose = POSES[tone]
+	const bubble = bubbleOf(agent, tone, endedAt, now)
 	return {
 		id: agent.id,
 		title: agent.description,
@@ -245,6 +260,8 @@ function rowView(
 		role: agent.role,
 		species,
 		pose,
+		bubble: bubble.text,
+		bubbleTone: bubble.tone,
 		pulse: tone === 'running' ? pulseAt(now) : null,
 		// `?.`: a model saved before files were tracked has no `files` until its next event.
 		fileCount: state.files?.[agent.id]?.length ?? 0,
