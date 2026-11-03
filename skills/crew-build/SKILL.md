@@ -90,7 +90,7 @@ Crew draws from the task list and the sub-agents, so keep both honest:
 - Give each sub-agent a short, specific `description` (for example "Implement Task 3: parser"). Crew uses it as the card title, and with a wave running side by side, distinct titles are how the user tells the cards apart.
 - **Every sub-agent tracks its work as tasks**, so its card in the Agents panel lists its progress: `N/M · <current step>` and a bar to scale. Write this into every sub-agent's prompt yourself (implementers, reviewers, verifiers), on top of the note Crew appends:
   - Before any other work, write a task list of 3 to 7 short, concrete steps with the task-list tool (`TodoWrite`, or `TaskCreate` then `TaskUpdate`).
-  - In the desktop app a sub-agent has neither tool, and the app refuses its `update_plan`. There, it sends the whole list to `mcp__crew__set_steps` instead, each step `pending`, `in_progress` or `completed`, and sends it again whenever a step changes. Say so in the prompt.
+  - In the desktop app a sub-agent has neither tool, and the app refuses its `update_plan`. There, it sends the whole list to `mcp__crew__set_steps` instead, each step `pending`, `in_progress` or `completed`, and sends it again whenever a step changes. The tool may be deferred: it loads with ToolSearch `select:mcp__crew__set_steps`. Say both in the prompt.
   - Keep exactly one step in progress. Mark each one completed as soon as it's done, not in a batch at the end.
   - Add a step if the work grows, and tick every step off before reporting back.
   - A sub-agent that keeps no task list shows only a shimmer, with no steps. If a card shows only a shimmer, remind that sub-agent with `SendMessage`.

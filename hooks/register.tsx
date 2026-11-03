@@ -43,7 +43,8 @@ const BEATS_PER_PULSE = SHINE_STEP_MS / BEAT_MS
 const STEPS_NOTE =
 	'\n\n(Progress for the Crew panel: before you start, write your plan as a task list of 3 to 7 short steps with ' +
 	'your task-list tool (TodoWrite, or TaskCreate and TaskUpdate), then mark each step in progress and completed as you go. ' +
-	'If you have no task-list tool, send the whole list to mcp__crew__set_steps instead, again each time a step changes.)'
+	'If you have no task-list tool, send the whole list to mcp__crew__set_steps instead (load it with ToolSearch ' +
+	'"select:mcp__crew__set_steps" if it is deferred), again each time a step changes.)'
 
 // A tool Claude can call to bring up the Agents pane, as /crew does for a person: a skill opens it as work begins.
 const OPEN_PANEL_TOOL = 'mcp__crew__open_panel'
