@@ -24,7 +24,7 @@ const text = (value: unknown) => (typeof value === 'string' ? value : '')
 const baseName = (path: unknown) => text(path).replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? ''
 const say = (verb: string, subject: string) => (subject ? `${verb} ${subject}` : undefined)
 
-// Task tools the steps line already shows, plus the read-only ones that say nothing useful.
+// Read-only task tools: nothing worth a bubble.
 const QUIET = new Set(['TaskList', 'TaskGet'])
 // A leading `cd <dir> &&` hop or `NAME=value` assignment: where or how a command ran, and possibly a secret.
 const LEAD = /^\s*(?:cd\s+(?:"[^"]*"|'[^']*'|\S+)\s*(?:&&|;)\s*|[A-Za-z_]\w*=(?:"[^"]*"|'[^']*'|\S*)\s+)/
@@ -72,6 +72,7 @@ export function phraseFor(id: string, tone: 'done' | 'stopped'): string {
 	return list[hash % list.length]
 }
 
-// Whether an agent ended recently enough that its phrase is still up, plus two beats so the redraw that clears it.
+// Whether an agent ended recently enough that its phrase is still up, plus two seconds so the redraw that clears
+// it still comes.
 export const isCheering = (state: CrewState, now: number) =>
 	Object.values(state.agents).some(agent => agent.endedAt !== undefined && now - agent.endedAt < BUBBLE_MS + 2000)
