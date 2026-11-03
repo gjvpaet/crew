@@ -36,7 +36,11 @@ type Options = {
 	slow?: { prefix: string; until: Promise<void> }
 	// What `$.agent.list` answers at a `turn.step`, which is how Crew learns an agent waits.
 	listed?: Array<{ id: string; description: string; type: string; status: string }>
+	// Every git call fails as a global gitconfig git cannot parse makes it, unless it is run without that file.
+	isGlobalConfigBroken?: boolean
 }
+
+const BROKEN_CONFIG = "fatal: bad config variable 'gpg.format' in file '/Users/me/.gitconfig' at line 9\n"
 
 const answer = (table: Record<string, string | number> | undefined, argv: string[]) =>
 	Object.entries(table ?? {}).find(([prefix]) => argv.join(' ').startsWith(prefix))?.[1]
@@ -71,6 +75,10 @@ async function start($: any, on: any, options: Options = {}) {
 		// The kit hands `$.process.run`'s second argument to its hooks as `e.init`.
 		stdins.push({ argv, stdin: e.init?.stdin })
 		if (options.throwing && argv.join(' ').startsWith(options.throwing)) throw new Error('could not start')
+		if (options.isGlobalConfigBroken && argv[0] === 'git' && e.init?.env?.GIT_CONFIG_GLOBAL !== '/dev/null') {
+			const value = { exitCode: 128, stdout: '', stderr: BROKEN_CONFIG, isStdoutTruncated: false, isStderrTruncated: false }
+			return { value }
+		}
 		const stdout = String(answer(options.stdout, argv) ?? '')
 		const exitCode = Number(answer(options.exits, argv) ?? 0)
 		const value = { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
@@ -1177,6 +1185,20 @@ test('once git has answered, the rows show their line counts and the card its br
 		expect(branch.at(-1).props.color).toBe('#E6C463')
 		await files.unmount()
 	}
+	await pane.unmount()
+})
+
+test('a global gitconfig git cannot parse is skipped, so the counts and branch still show', async ($, on) => {
+	const { clock } = await start($, on, { stdout: REFRESH, isGlobalConfigBroken: true })
+	await $.tool.call(edit('/repo/a.js', 'a1'))
+	await clock.settle()
+	const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	await pane.press({ key: 'files-a1' })
+	const files = await $.ui.mount({ ...FILES, surface: 'desktop' })
+	const branch = (await files.find({ key: 'branch' }))?.children ?? []
+	expect(shown(branch[1].children[0])).toBe('feat/pricing')
+	expect(branch.slice(2).map(shown).join(' ')).toBe('+12 \u22123 · 2 changed')
+	await files.unmount()
 	await pane.unmount()
 })
 

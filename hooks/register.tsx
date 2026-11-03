@@ -155,9 +155,8 @@ async function afterBash($: EngineInterface, command: string, agentId: string | 
 // throw, leaves every path counting, since an edit shown wrongly beats one lost.
 async function ignoredAmong($: EngineInterface, top: string, paths: string[]): Promise<string> {
 	try {
-		const asked = await $.process.run(['git', '--no-optional-locks', '-C', top, 'check-ignore', '-z', '--stdin'], {
-			stdin: paths.map(path => `${path}\0`).join(''),
-			timeoutMs: GIT_MS
+		const asked = await runGit($, ['git', '--no-optional-locks', '-C', top, 'check-ignore', '-z', '--stdin'], {
+			stdin: paths.map(path => `${path}\0`).join('')
 		})
 		return asked.exitCode === 0 ? asked.stdout : ''
 	} catch {
@@ -194,9 +193,22 @@ async function recordBashEdits($: EngineInterface, command: string, agentId: str
 
 const GIT_MS = 5_000
 
+// A global gitconfig git cannot parse (an empty `format =` under [gpg], left by a client switching profiles) stops every
+// git call before it reads anything. Crew only reads, so such a call is asked once more without that file.
+const BAD_CONFIG = /fatal: bad config/
+const NO_GLOBAL_CONFIG = { GIT_CONFIG_GLOBAL: '/dev/null' }
+
+async function runGit($: EngineInterface, argv: string[], extra: { stdin?: string } = {}) {
+	const init = { ...extra, timeoutMs: GIT_MS }
+	const first = await $.process.run(argv, init)
+	if (first.exitCode === 0 || !BAD_CONFIG.test(first.stderr)) return first
+	const retry = { ...init, env: NO_GLOBAL_CONFIG }
+	return $.process.run(argv, retry)
+}
+
 // The arguments come as a list: the engine scan rejects `$` passed in a call that also spreads.
 const gitIn = ($: EngineInterface, dir: string, args: string[]) =>
-	$.process.run(['git', '--no-optional-locks', '-C', dir, ...args], { timeoutMs: GIT_MS })
+	runGit($, ['git', '--no-optional-locks', '-C', dir, ...args])
 
 // What an agent has edited or committed, which is what git has numbers for; a read changes no line.
 async function workedOn($: EngineInterface, agentId: string | undefined): Promise<string[]> {
