@@ -22,8 +22,33 @@ test('a tool call becomes what the agent is doing', async () => {
 	expect(actionText('NewTool', {})).toBe('Using NewTool')
 })
 
+test('a command shows what it runs, not its cd hops or env vars', async () => {
+	const bash = (command: string) => actionText('Bash', { command })
+	expect(bash('TOKEN=sk-abc curl https://x')).toBe('Running curl https://x')
+	expect(bash('GIT_CONFIG_GLOBAL=/dev/null git log -1')).toBe('Running git log')
+	expect(bash('cd "dir with spaces" && bun test')).toBe('Running bun test')
+	expect(bash('cd a && cd b && ls -la')).toBe('Running ls -la')
+	expect(bash('cd a; make build')).toBe('Running make build')
+	expect(bash('cd /r && FOO=1 bun test')).toBe('Running bun test')
+})
+
+test('an empty subject leaves the bubble alone', async () => {
+	expect(actionText('Read', {})).toBeUndefined()
+	expect(actionText('Read', { file_path: '/' })).toBeUndefined()
+	expect(actionText('Read', { file_path: '/repo/dir/' })).toBe('Reading dir')
+	expect(actionText('Bash', { command: '' })).toBeUndefined()
+	expect(actionText('Grep', { pattern: '' })).toBeUndefined()
+	expect(actionText('Skill', {})).toBeUndefined()
+})
+
+test('mcp tool names and url userinfo read cleanly', async () => {
+	expect(actionText('mcp__ccd_session__mark_chapter', {})).toBe('Using mark chapter')
+	expect(actionText('mcp__plugin_claude-mem_mcp-search____IMPORTANT', {})).toBe('Using IMPORTANT')
+	expect(actionText('WebFetch', { url: 'https://user:token@example.com/x' })).toBe('Reading example.com')
+})
+
 test('the task tools change nothing: the steps line already shows them', async () => {
-	for (const tool of ['TodoWrite', 'TaskCreate', 'TaskUpdate']) expect(actionText(tool, {})).toBeUndefined()
+	for (const tool of ['TodoWrite', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet']) expect(actionText(tool, {})).toBeUndefined()
 })
 
 test('an agent always gets the same phrase, from the list for how it ended', async () => {
@@ -39,8 +64,8 @@ test('the panel keeps beating while a just-finished agent still shows its phrase
 		{ kind: 'turnStart', at: 1000, turnId: 't1', text: 'Go' },
 		{ kind: 'turnEnd', at: 2000, isAborted: false, reason: 'answer' }
 	].reduce((state, ev) => reduce(state, ev as CrewEvent), EMPTY_STATE)
-	expect(isCheering(ended, 2000 + BUBBLE_MS)).toBe(true)
-	// One beat past the bubble, so the redraw that clears it still comes.
-	expect(isCheering(ended, 2000 + BUBBLE_MS + 1000)).toBe(false)
+	expect(isCheering(ended, 2000 + BUBBLE_MS + 1000)).toBe(true)
+	// Two beats past the bubble, so the redraw that clears it still comes.
+	expect(isCheering(ended, 2000 + BUBBLE_MS + 2000)).toBe(false)
 	expect(isCheering(EMPTY_STATE, 2000)).toBe(false)
 })
