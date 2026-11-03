@@ -87,6 +87,17 @@ test('ends sort agents into groups and an abort stops the rest', async () => {
 	expect(aborted.turn?.isAborted).toBe(true)
 })
 
+test('a stopped agent that steps again loses its stale action', async () => {
+	const state = run([
+		...START,
+		{ kind: 'action', agentId: 'a3', text: 'Reading a.ts' },
+		{ kind: 'turnEnd', at: 30_000, isAborted: true, reason: 'aborted' },
+		{ kind: 'step', at: 31_000, agentId: 'a3', model: 'claude-opus-5-5', usage: usage(1, 1, 0, 0) }
+	])
+	expect(state.agents.a3.status).toBe('running')
+	expect(state.agents.a3.action).toBeUndefined()
+})
+
 test('a visible task list drives progress', async () => {
 	const state = run([
 		...START,

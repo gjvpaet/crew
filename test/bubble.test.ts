@@ -30,6 +30,16 @@ test('a command shows what it runs, not its cd hops or env vars', async () => {
 	expect(bash('cd a && cd b && ls -la')).toBe('Running ls -la')
 	expect(bash('cd a; make build')).toBe('Running make build')
 	expect(bash('cd /r && FOO=1 bun test')).toBe('Running bun test')
+	expect(bash('source ~/.nvm/nvm.sh && nvm use 24 && npm test')).toBe('Running npm test')
+	expect(bash('export PATH=/opt/bin:$PATH && bun test')).toBe('Running bun test')
+	expect(bash('export TOKEN=sk-abc; curl https://x')).toBe('Running curl https://x')
+	expect(bash('env FOO=1 BAR=2 make build')).toBe('Running make build')
+	expect(bash('. ./env.sh && ls')).toBe('Running ls')
+	expect(bash('curl X=1')).toBe('Running curl')
+})
+
+test('the text is capped at 120 characters', async () => {
+	expect(actionText('Grep', { pattern: 'x'.repeat(300) })!.length).toBeLessThanOrEqual(120)
 })
 
 test('an empty subject leaves the bubble alone', async () => {

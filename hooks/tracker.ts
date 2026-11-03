@@ -200,7 +200,7 @@ function spawnAgent(state: CrewState, ev: Extract<CrewEvent, { kind: 'spawn' }>)
 
 function revive(agent: AgentRecord): AgentRecord {
 	if (agent.status !== 'stopped') return agent
-	const { endedAt: _ended, ...rest } = agent
+	const { endedAt: _ended, action: _action, ...rest } = agent
 	return { ...rest, status: 'running' }
 }
 

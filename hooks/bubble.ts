@@ -26,11 +26,16 @@ const say = (verb: string, subject: string) => (subject ? `${verb} ${subject}` :
 
 // Read-only task tools: nothing worth a bubble.
 const QUIET = new Set(['TaskList', 'TaskGet'])
-// A leading `cd <dir> &&` hop or `NAME=value` assignment: where or how a command ran, and possibly a secret.
-const LEAD = /^\s*(?:cd\s+(?:"[^"]*"|'[^']*'|\S+)\s*(?:&&|;)\s*|[A-Za-z_]\w*=(?:"[^"]*"|'[^']*'|\S*)\s+)/
+// A leading setup hop (`cd`, `source`, `.`, `nvm use`, `export`/`env` assignments, `NAME=value`): where or how a command ran, and possibly a secret.
+const ARG = String.raw`(?:"[^"]*"|'[^']*'|\S+)`
+const ASSIGN = String.raw`[A-Za-z_]\w*=(?:"[^"]*"|'[^']*'|\S*)`
+const HOP = String.raw`\s*(?:&&|;)\s*`
+const LEAD = new RegExp(
+	String.raw`^\s*(?:(?:cd|source|\.|nvm\s+use)\s+${ARG}${HOP}|(?:export|env)(?:\s+${ASSIGN})+${HOP}|env(?:\s+${ASSIGN})+\s+|${ASSIGN}\s+)`
+)
 
 // What an agent is doing, from the tool call it just started; undefined when there is nothing to say, so the bubble stays as it was.
-export function actionText(tool: string, input: Record<string, unknown>): string | undefined {
+function describe(tool: string, input: Record<string, unknown>): string | undefined {
 	if (TASK_TOOLS.has(tool) || QUIET.has(tool)) return undefined
 	switch (tool) {
 		case 'Read':
@@ -43,7 +48,7 @@ export function actionText(tool: string, input: Record<string, unknown>): string
 		case 'Bash': {
 			let command = text(input.command)
 			for (let next = command.replace(LEAD, ''); next !== command; next = command.replace(LEAD, '')) command = next
-			return say('Running', command.trim().split(/\s+/).slice(0, 2).join(' '))
+			return say('Running', command.trim().split(/\s+/).slice(0, 2).filter(word => !word.includes('=')).join(' '))
 		}
 		case 'Grep':
 			return say('Searching for', text(input.pattern) && `'${text(input.pattern)}'`)
@@ -63,6 +68,9 @@ export function actionText(tool: string, input: Record<string, unknown>): string
 	const mcp = /^mcp__.+?__(.+)$/.exec(tool)
 	return `Using ${mcp ? mcp[1].replace(/_+/g, ' ').trim() : tool}`
 }
+
+// Capped so a huge pattern or URL never sits whole in state.
+export const actionText = (tool: string, input: Record<string, unknown>) => describe(tool, input)?.slice(0, 120)
 
 // A phrase picked by the agent's id, so one agent keeps the same one across every redraw.
 export function phraseFor(id: string, tone: 'done' | 'stopped'): string {
