@@ -458,7 +458,8 @@ export function ruleSvg(color: string): string {
 }
 
 // A speech bubble over a Pip: rounded ends and a tail at its bottom-left, over the head. One path, so its edge runs
-// round the tail without a seam; the Cool Greige edge keeps a light bubble readable on a light panel.
+// round the tail without a seam; the Cool Greige edge keeps the bubble readable on light and dark panels alike.
+// The tail's tip is 13px in, over Pip's head, and minWidth keeps the right end clear of the tail.
 export const BUBBLE_TONES = {
 	running: { fill: '#F4F4F2', color: '#2C2C2A' },
 	done: { fill: '#C0DD97', color: '#173404' },
@@ -481,7 +482,7 @@ export function bubbleSvg(text: string, tone: BubbleTone): { source: string; wid
 		`M ${num(left)} ${top} H ${num(right)} A ${radius} ${radius} 0 0 1 ${num(right)} ${bottom} ` +
 		`H 22 L 13 ${num(bottom + tail)} L 12 ${bottom} H ${num(left)} A ${radius} ${radius} 0 0 1 ${num(left)} ${top} Z`
 	const source =
-		`${svgOpen(width, height)}<path d="${outline}" fill="${fill}" stroke="${edge}" stroke-width="1"/>` +
+		`${svgOpen(width, height)}<path d="${outline}" fill="${fill}" stroke="${edge}" stroke-width="1" stroke-linejoin="round"/>` +
 		`<text x="${num(width / 2)}" y="${num(top + radius)}" text-anchor="middle" dominant-baseline="central" ` +
 		`font-family="${SHINE_FONT}" font-size="${fontSize}" font-weight="500" fill="${color}">${escapeXml(text)}</text></svg>`
 	return { source, width, height }

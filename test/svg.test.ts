@@ -428,6 +428,12 @@ test('a speech bubble fits its text, has a tail over Pip and takes its tone’s 
 	expect(long.source).toContain('fill="#F4F4F2"')
 	expect(bubbleSvg('Hit a snag', 'stopped').source).toContain('fill="#D3D1C7"')
 	// One edge colour on every tone, so it reads on light and dark panels.
-	expect(long.source).toContain('stroke="#C7C4BF"')
+	// A round join, so the tail's tip ends at the 27px height instead of poking past it.
+	for (const tone of ['running', 'done', 'stopped'] as const) {
+		const { source } = bubbleSvg('Hi', tone)
+		expect(source).toContain('stroke="#C7C4BF"')
+		expect(source).toContain('stroke-linejoin="round"')
+	}
+	expect(bubbleSvg('Hi', 'running').width).toBe(40)
 	expect(bubbleSvg("Searching for '<a>'", 'running').source).toContain('&apos;&lt;a&gt;&apos;')
 })
