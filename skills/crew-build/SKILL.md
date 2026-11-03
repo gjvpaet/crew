@@ -19,7 +19,7 @@ Copy this checklist into the task list and tick it off as you go:
 
 - [ ] Open the Crew panel (`mcp__crew__open_panel`)
 - [ ] `superpowers:brainstorming`: design agreed with the user, spec written
-- [ ] `superpowers:writing-plans`: implementation plan written (brainstorming hands off here)
+- [ ] `ponytail` invoked, then `superpowers:writing-plans`: lean implementation plan written (brainstorming hands off here)
 - [ ] `superpowers:using-git-worktrees`: base branch chosen by the user, isolated worktree ready before any code changes
 - [ ] `superpowers:subagent-driven-development`: tasks built by sub-agents in parallel waves where they're independent, each one reviewed
 - [ ] Browser verification in the user's default browser (when the change shows up in a browser)
@@ -32,13 +32,26 @@ Copy this checklist into the task list and tick it off as you go:
 Rules for each stage:
 
 - **Brainstorming.** Its hard gate stands: no code until the user approves the design. Ask the user to choose; never assume.
-- **Writing plans.** Put the plan where that skill says, unless the user or the repo's CLAUDE.md names another place. Give every task a `Depends on:` line (task numbers, or `none`) next to its `Files:` list, so the parallel waves below can be read straight off the plan.
+- **Writing plans.** Invoke the `ponytail` skill first, then write the plan with it in mind (see "Ponytail: the plan, then every implementer" below). Put the plan where that skill says, unless the user or the repo's CLAUDE.md names another place. Give every task a `Depends on:` line (task numbers, or `none`) next to its `Files:` list, so the parallel waves below can be read straight off the plan.
 - **Worktrees.** Create or confirm the worktree before the first implementer runs. Never build on `main`/`master` without the user's explicit consent.
   - **Ask for the base branch first, every time.** Before creating a worktree, ask the user which branch to base it on, with AskUserQuestion. Offer the current branch and the repository's default branch, plus any branch the conversation has named. Never pick one yourself, even when only one seems likely. Reusing an existing worktree needs no question.
   - The per-implementer worktrees in a parallel wave (below) are cut from the feature branch the user already chose, so they don't need the question again.
-- **Subagent-driven development.** One implementer per task, then spec review, then quality review. Keep sub-agents on that skill's prompt templates. Run independent tasks in parallel, as described below. Every implementer runs the `ponytail` skill first (see "Implementers start with ponytail" below).
+- **Subagent-driven development.** One implementer per task, then spec review, then quality review. Keep sub-agents on that skill's prompt templates. Run independent tasks in parallel, as described below. Every implementer runs the `ponytail` skill first (see "Ponytail: the plan, then every implementer" below).
 
-## Implementers start with ponytail
+## Ponytail: the plan, then every implementer
+
+Scope is set in the plan, and implementers mostly carry out its code as written, so the `ponytail` skill runs twice: once over the plan, and again in every implementer.
+
+### The plan
+
+Before `superpowers:writing-plans` writes anything, invoke `ponytail` with the Skill tool. If a sub-agent drafts the plan, put the same first step in its prompt. Keep it in mind while writing:
+
+- **Keep it lean.** Use the fewest tasks and files that fully deliver the approved design. Add no helper, abstraction, option or dependency the design doesn't need, and write each task's code as the smallest change that does its job.
+- **The approved design is fixed.** Ponytail trims how things get built, never what you and the user agreed in brainstorming. Don't run it during brainstorming; the design is the user's call. If ponytail suggests dropping something the user asked for, ask the user.
+- **writing-plans' rules stand.** Tests for every task (TDD), no placeholders, exact file paths, complete code in every step, and each task's `Depends on:` line. Lean code, never skipped tests.
+- **If the skill isn't there,** say so in one line and write the plan as usual.
+
+### Every implementer
 
 Every implementer sub-agent invokes the `ponytail` skill before it writes or changes any code, so it builds the smallest change that fully does its task. That covers the first implementer of a task, any fix-up implementer sent back after a review, and every implementer in a parallel wave.
 
