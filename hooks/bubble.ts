@@ -75,4 +75,7 @@ export function phraseFor(id: string, tone: 'done' | 'stopped'): string {
 // Whether an agent ended recently enough that its phrase is still up, plus two seconds so the redraw that clears
 // it still comes.
 export const isCheering = (state: CrewState, now: number) =>
-	Object.values(state.agents).some(agent => agent.endedAt !== undefined && now - agent.endedAt < BUBBLE_MS + 2000)
+	Object.values(state.agents).some(agent => {
+		const age = agent.endedAt === undefined ? -1 : now - agent.endedAt
+		return age >= 0 && age < BUBBLE_MS + 2000
+	})

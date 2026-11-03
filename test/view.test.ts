@@ -1,5 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
+import { BUBBLE_MS, phraseFor } from '../hooks/bubble'
 import { PALETTE, SPECIES_ORDER } from '../hooks/sprite'
 import { EMPTY_STATE, reduce, selectProgress, type CrewEvent } from '../hooks/tracker'
 import {
@@ -494,4 +495,45 @@ test('a move slides the card in from the right, lit, and leaves a fading note wh
 	const done = at(1000 + MOVE_MS)
 	expect(done.groups.map((group: any) => group.name)).toEqual(['Finished'])
 	expect(done.arrivals).toEqual({})
+})
+
+const rowIn = (view: ReturnType<typeof panelView>, id: string) =>
+	[view.main, ...view.groups.flatMap(group => group.rows)].find(row => row?.id === id)
+
+test('a running agent’s bubble says what it is doing; with no action yet it has none', async () => {
+	const state = reduce(STATE, { kind: 'action', agentId: 'a2', text: 'Editing hero.tsx' })
+	const view = panelView(state, {}, 21_000, 20, {})
+	expect(rowIn(view, 'a2')?.bubble).toBe('Editing hero.tsx')
+	expect(rowIn(view, 'a2')?.bubbleTone).toBe('running')
+	expect(rowIn(view, 'a3')?.bubble).toBe('')
+})
+
+test('a finished agent shows its phrase for six seconds, then no bubble', async () => {
+	// a1 ended at 20_000.
+	const during = rowIn(panelView(STATE, {}, 20_000 + BUBBLE_MS - 1, 20, {}), 'a1')
+	expect(during?.bubble).toBe(phraseFor('a1', 'done'))
+	expect(during?.bubbleTone).toBe('done')
+	expect(rowIn(panelView(STATE, {}, 20_000 + BUBBLE_MS, 20, {}), 'a1')?.bubble).toBe('')
+})
+
+test('a stopped agent shows a gentle line', async () => {
+	const stopped = reduce(STATE, { kind: 'turnEnd', at: 21_000, agentId: 'a2', isAborted: true, reason: 'interrupted' })
+	const row = rowIn(panelView(stopped, {}, 22_000, 20, {}), 'a2')
+	expect(row?.bubble).toBe(phraseFor('a2', 'stopped'))
+	expect(row?.bubbleTone).toBe('stopped')
+})
+
+test('Main says its phrase by turn; waiting on agents, or a waiting agent, says nothing', async () => {
+	// Main's turn ends at 21_000 while a2 and a3 still run.
+	const mainDone = reduce(STATE, { kind: 'turnEnd', at: 21_000, isAborted: false, reason: 'answer' })
+	expect(rowIn(panelView(mainDone, {}, 22_000, 20, {}), 'main')?.bubble).toBe('')
+	const finished = reduce(mainDone, {
+		kind: 'statuses',
+		at: 21_500,
+		list: [{ id: 'a2', status: 'completed' }, { id: 'a3', status: 'completed' }]
+	})
+	const mainRow = rowIn(panelView(finished, {}, 22_000, 20, {}), 'main')
+	expect(mainRow?.bubble).toBe(phraseFor('t1', 'done'))
+	const paused = reduce(STATE, { kind: 'statuses', at: 21_000, list: [{ id: 'a2', status: 'waiting' }] })
+	expect(rowIn(panelView(paused, {}, 22_000, 20, {}), 'a2')?.bubble).toBe('')
 })

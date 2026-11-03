@@ -424,8 +424,13 @@ test('the pane and band redraw only while time is counting, five a second while 
 	await clock.advance(3000)
 	expect(redraws).toBe(15)
 	await $.turn.complete({ turnId: 't1', answer: 'x', durationMs: 1, isAborted: false, reason: 'answer' } as any)
+	// Main's success bubble keeps a once-a-second redraw going until it has been cleared, then everything stops.
+	await clock.advance(10_000)
+	const cheered = redraws - 15
+	expect(cheered).toBeGreaterThanOrEqual(6)
+	expect(cheered).toBeLessThanOrEqual(9)
 	await clock.advance(3000)
-	expect(redraws).toBe(15)
+	expect(redraws).toBe(15 + cheered)
 })
 
 // The kit guards $.state (a throwing state hook is skipped, a refused read is unset), so the failure injected here
