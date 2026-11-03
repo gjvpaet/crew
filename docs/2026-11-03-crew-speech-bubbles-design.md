@@ -1,6 +1,6 @@
 # Crew speech bubbles — design
 
-Date: 2026-11-03 · Branch: `build/v0.1`
+Date: 2026-11-03 · Branch: `feat/speech-bubbles` (from `build/v0.1`)
 
 ## Goal
 
@@ -126,3 +126,29 @@ Stopped phrases: `Hit a snag`, `Ran out of road`, `Taking a breather`, `Not this
 - The task bar above the prompt gets no bubble.
 - No bubble animation: no pop-in and no typing dots.
 - No settings to turn the bubble off, or to change the phrases.
+
+## As built
+
+Where the build differs from the design above, from the reviews:
+
+- **At most 24 bubbles per drawing** (`MAX_BUBBLES`). The first 24 cards drawn get them, running agents first; later cards drop theirs. Main's card is never capped. Uncapped, 220 agents pushed the terminal pane past its 20,000-node ceiling.
+- **The redraw ticker keeps a once-a-second beat** while a finished agent's phrase is up (`isCheering`), for `BUBBLE_MS + 2000`. Without it, the bubble wouldn't clear once nothing else is live. Like `bubbleOf`, it treats a clock that moved backwards as "not fresh".
+- **An empty subject changes nothing.** A missing file path, an empty pattern, an empty command after stripping, or a missing skill name sends no event, so the previous bubble stays up.
+- **Bash text skips setup hops:**
+  - leading `cd <dir>` (quoted or not), `source <file>`, `. <file>` and `nvm use <version>` hops, followed by `&&` or `;`;
+  - `export` and `env` assignments, and bare `NAME=value` assignments;
+  - any shown word that contains `=` is dropped, so an assignment's value never reaches the bubble.
+- **Bubble text is capped at 120 characters** in state. The drawing shortens it to 28 letters, while the alt and the terminal line keep up to 120.
+- **`TaskList` and `TaskGet` are quiet** too, along with the task tools.
+- **WebFetch shows only the host,** never `user:pass@`.
+- **MCP tool names:** runs of underscores become one space.
+- **Main's phrase is picked by the turn id,** so it changes from prompt to prompt. Sub-agents still use their own id.
+- **A run starts without an action.** A resumed sub-agent, Main's continuation turn and a revived agent all start with no bubble until their next tool call.
+- **`apply` skips any event that changes nothing,** so a repeated action writes and redraws nothing.
+- **In the terminal,** a stopped bubble is plain dim, the same as a running one.
+
+Left for later:
+
+- **Pip's hop may restart** when its card switches between one row and two.
+- **"Briefing a sub-agent" stays up** on the parent for the whole of a foreground sub-agent's run.
+- **The terminal's node ceiling** at around 220 agents, which predates this feature.
