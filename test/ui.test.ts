@@ -1,5 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
+import { phraseFor } from '../hooks/bubble'
+
 const BAND = {
 	plugin: 'crew',
 	component: 'AbovePrompt',
@@ -27,7 +29,7 @@ async function svgs(ui: any, alt: RegExp): Promise<any[]> {
 }
 
 async function startTwoAgents($: any, on: any) {
-	mock.clock(on, { now: 1000 })
+	const clock = mock.clock(on, { now: 1000 })
 	mock.store(on)
 	on('command.register', () => ({ value: { command: 'crew' } }))
 	on('tool.register', () => ({ value: { tool: 'mcp__crew__set_mascot' } }))
@@ -50,6 +52,7 @@ async function startTwoAgents($: any, on: any) {
 	await $.turn.start({ text: 'Build the launch kit', turnId: 't1' })
 	await $.agent.spawn({ prompt: 'go', description: 'Research competitor launches', subagentType: 'Explore' })
 	await $.agent.spawn({ prompt: 'go', description: 'Build the landing page', subagentType: 'general-purpose' })
+	return clock
 }
 
 test('the band shows agent progress and hides on ×', async ($, on) => {
@@ -857,4 +860,76 @@ test('past what even one-line rows can hold, the rest of a group is a count', as
 	// The terminal has no such limit: every agent keeps its card there.
 	const terminal = await $.ui.mount({ ...PANE, surface: 'terminal' })
 	expect(await terminal.find({ key: 'more-Finished' })).toBeUndefined()
+})
+
+test('a running card shows its action in a bubble over Pip, the whole text in its alt', async ($, on) => {
+	on('tool.call', () => ({ result: {} }))
+	await startTwoAgents($, on)
+	await $.tool.call({ tool: 'Read', file_path: '/repo/hooks/band.tsx', agentId: 'a1' } as any)
+	const longFile = '/repo/hooks/a-very-long-file-name-for-the-bubble.tsx'
+	await $.tool.call({ tool: 'Read', file_path: longFile, agentId: 'a2' } as any)
+	const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	expect(await svgs(ui, /^Reading band\.tsx$/)).toHaveLength(1)
+	// The card stacks its bubble over its usual row.
+	expect((await ui.find({ key: 'row-a1' }))?.props.flexDirection).toBe('column')
+	expect(await ui.find({ key: 'bubble-a1' })).toBeDefined()
+	// A long action is shortened in the drawing, never in its alt.
+	const [long] = await svgs(ui, /^Reading a-very-long-file-name-for-the-bubble\.tsx$/)
+	expect(String(long?.props.source)).toContain('…')
+	await ui.unmount()
+	const terminal = await $.ui.mount({ ...PANE, surface: 'terminal' })
+	expect(await terminal.find({ type: 'Text', text: '▸ Reading band.tsx' })).toBeDefined()
+	await terminal.unmount()
+})
+
+test('a card with nothing to say keeps its single row', async ($, on) => {
+	await startTwoAgents($, on)
+	const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	expect((await ui.find({ key: 'row-a1' }))?.props.flexDirection).toBe('row')
+	expect(await ui.find({ key: 'bubble-a1' })).toBeUndefined()
+	await ui.unmount()
+})
+
+test('a finished agent cheers for six seconds, then its bubble goes', async ($, on) => {
+	const clock = await startTwoAgents($, on)
+	await $.turn.complete({
+		turnId: 's',
+		agentId: 'a1',
+		answer: 'x',
+		durationMs: 1,
+		isAborted: false,
+		reason: 'answer'
+	} as any)
+	const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+	const phrase = phraseFor('a1', 'done')
+	expect(await svgs(ui, new RegExp(`^${phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`))).toHaveLength(1)
+	await clock.advance(7000)
+	expect(await ui.find({ key: 'bubble-a1' })).toBeUndefined()
+	await ui.unmount()
+})
+
+test('only the first 24 cards in a drawing keep their bubble', async ($, on) => {
+	on('tool.call', () => ({ result: {} }))
+	mock.clock(on, { now: 1000 })
+	mock.store(on)
+	on('command.register', () => ({ value: { command: 'crew' } }))
+	on('tool.register', () => ({ value: { tool: 'mcp__crew__set_mascot' } }))
+	on('ui.open', () => ({ value: { isPlaced: true } }))
+	on('ui.toast', () => ({ value: undefined }))
+	on('session.start', (_: unknown, e: any) => ({ cwd: e.cwd }))
+	on('turn.start', (_: unknown, e: any) => ({ turnId: e.turnId }))
+	on('turn.complete', () => ({ text: '' }))
+	on('agent.spawn', (_: unknown, e: any) => ({ model: 'claude-opus-5-5', agentId: e.description }))
+	await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+	await $.turn.start({ text: 'Build it', turnId: 't1' })
+	for (let i = 0; i < 30; i++) {
+		await $.agent.spawn({ prompt: 'go', description: `a${i}`, subagentType: 'general-purpose' })
+		await $.tool.call({ tool: 'Read', file_path: `/r/f${i}.ts`, agentId: `a${i}` } as any)
+	}
+	// The terminal: a desktop drawing's own budget already turns the later cards into lines before this cap bites.
+	const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+	const lines = await ui.findAll({ type: 'Text', text: /^▸ Reading f\d+\.ts$/ })
+	expect(lines.map((line: any) => line.text)).toEqual(Array.from({ length: 24 }, (_, i) => `▸ Reading f${i}.ts`))
+	expect((await ui.find({ key: 'row-a29' }))?.props.flexDirection).toBe('row')
+	await ui.unmount()
 })
