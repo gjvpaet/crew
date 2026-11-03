@@ -137,14 +137,14 @@ function startTurn(state: CrewState, ev: Extract<CrewEvent, { kind: 'turnStart' 
 	if (ev.agentId) {
 		const found = state.agents[ev.agentId] ?? newAgent(ev.agentId, ev.at, state.known[ev.agentId] ?? {})
 		const { agent, nextColor, known } = withColor(state, found)
-		const { endedAt: _ended, ...rest } = agent
+		const { endedAt: _ended, action: _action, ...rest } = agent
 		return { ...withAgent(state, { ...rest, status: 'running' }), order: withOrder(state, ev.agentId), nextColor, known }
 	}
 	// An empty prompt, one no person typed, or (origin unknown) a raw `<…>` envelope carries on the person's turn.
 	const isEnvelope = ev.isPerson === undefined && firstLine(ev.text).startsWith('<')
 	if (state.turn && (ev.text === '' || ev.isPerson === false || isEnvelope)) {
 		const { endedAt: _turnEnded, ...turn } = state.turn
-		const { endedAt: _mainEnded, ...main } = state.agents[MAIN] ?? newAgent(MAIN, ev.at)
+		const { endedAt: _mainEnded, action: _mainAction, ...main } = state.agents[MAIN] ?? newAgent(MAIN, ev.at)
 		return { ...withAgent(state, { ...main, status: 'running' }), turn: { ...turn, isAborted: false } }
 	}
 	const carried = Object.fromEntries(Object.entries(state.agents).filter(([id, agent]) => id !== MAIN && isLive(agent)))

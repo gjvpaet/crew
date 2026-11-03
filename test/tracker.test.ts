@@ -568,6 +568,7 @@ test('an action event keeps the agent’s latest action, and a later one replace
 	])
 	expect(state.agents.a1?.action).toBe('Editing band.tsx')
 	expect(state.agents[MAIN]?.action).toBe('Running bun test')
+	expect(reduce(state, { kind: 'action', agentId: 'a1', text: 'Editing band.tsx' })).toBe(state)
 })
 
 test('an action for an agent not on the board changes nothing, and a new prompt starts Main without one', async () => {
@@ -580,4 +581,19 @@ test('an action for an agent not on the board changes nothing, and a new prompt 
 		{ kind: 'turnStart', at: 3000, turnId: 't2', text: 'Next prompt' }
 	])
 	expect(next.agents[MAIN]?.action).toBeUndefined()
+})
+
+test('a turn that reopens an agent starts it without its last run’s action', async () => {
+	const state = run([
+		{ kind: 'turnStart', at: 1000, turnId: 't1', text: 'Build it' },
+		spawn('a1', 'Implement Task 1'),
+		{ kind: 'action', text: 'Running bun test' },
+		{ kind: 'action', agentId: 'a1', text: 'Editing band.tsx' },
+		{ kind: 'turnEnd', at: 2000, agentId: 'a1', isAborted: false, reason: 'answer' },
+		{ kind: 'turnEnd', at: 2500, isAborted: false, reason: 'answer' },
+		{ kind: 'turnStart', at: 3000, turnId: 't1', text: 'A note arrived', isPerson: false },
+		{ kind: 'turnStart', at: 3100, turnId: 's2', text: 'More', agentId: 'a1' }
+	])
+	expect(state.agents[MAIN]?.action).toBeUndefined()
+	expect(state.agents.a1?.action).toBeUndefined()
 })
