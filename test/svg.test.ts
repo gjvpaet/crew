@@ -7,6 +7,7 @@ import {
 	badgeSvg,
 	bandBarSvg,
 	barSvg,
+	bubbleSvg,
 	escapeXml,
 	iconSvg,
 	pipHeight,
@@ -412,4 +413,21 @@ test('a rule is one pixel tall and stretches to its column', () => {
 	expect(rule).toContain('preserveAspectRatio="none"')
 	expect(rule).toContain('height="1"')
 	expect(rule).toContain('fill="#3A3936"')
+})
+
+test('a speech bubble fits its text, has a tail over Pip and takes its tone’s colours', async () => {
+	const short = bubbleSvg('Ta-da!', 'done')
+	const long = bubbleSvg('Editing files-pane.tsx', 'running')
+	expect(long.width).toBeGreaterThan(short.width)
+	expect(short.width).toBeGreaterThanOrEqual(40)
+	expect(short.height).toBe(27)
+	// The tail's tip points down at the head, below the 20px body.
+	expect(short.source).toContain('L 13 26.5')
+	expect(short.source).toContain('fill="#C0DD97"')
+	expect(short.source).toContain('fill="#173404"')
+	expect(long.source).toContain('fill="#F4F4F2"')
+	expect(bubbleSvg('Hit a snag', 'stopped').source).toContain('fill="#D3D1C7"')
+	// One edge colour on every tone, so it reads on light and dark panels.
+	expect(long.source).toContain('stroke="#C7C4BF"')
+	expect(bubbleSvg("Searching for '<a>'", 'running').source).toContain('&apos;&lt;a&gt;&apos;')
 })

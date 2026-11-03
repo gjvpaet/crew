@@ -456,3 +456,33 @@ export function ruleSvg(color: string): string {
 		`<rect width="${BAR_NATIVE_WIDTH}" height="1" fill="${color}"/></svg>`
 	)
 }
+
+// A speech bubble over a Pip: rounded ends and a tail at its bottom-left, over the head. One path, so its edge runs
+// round the tail without a seam; the Cool Greige edge keeps a light bubble readable on a light panel.
+export const BUBBLE_TONES = {
+	running: { fill: '#F4F4F2', color: '#2C2C2A' },
+	done: { fill: '#C0DD97', color: '#173404' },
+	stopped: { fill: '#D3D1C7', color: '#444441' }
+} as const
+export type BubbleTone = keyof typeof BUBBLE_TONES
+const BUBBLE = { fontSize: 12, padX: 9, body: 20, tail: 6, edge: '#C7C4BF', minWidth: 40 }
+
+export function bubbleSvg(text: string, tone: BubbleTone): { source: string; width: number; height: number } {
+	const { fontSize, padX, body, tail, edge, minWidth } = BUBBLE
+	const { fill, color } = BUBBLE_TONES[tone]
+	const width = Math.max(minWidth, Math.ceil(textEms(text) * fontSize) + padX * 2)
+	const height = body + tail + 1
+	const radius = body / 2
+	const top = 0.5
+	const bottom = body + 0.5
+	const left = 0.5 + radius
+	const right = width - 0.5 - radius
+	const outline =
+		`M ${num(left)} ${top} H ${num(right)} A ${radius} ${radius} 0 0 1 ${num(right)} ${bottom} ` +
+		`H 22 L 13 ${num(bottom + tail)} L 12 ${bottom} H ${num(left)} A ${radius} ${radius} 0 0 1 ${num(left)} ${top} Z`
+	const source =
+		`${svgOpen(width, height)}<path d="${outline}" fill="${fill}" stroke="${edge}" stroke-width="1"/>` +
+		`<text x="${num(width / 2)}" y="${num(top + radius)}" text-anchor="middle" dominant-baseline="central" ` +
+		`font-family="${SHINE_FONT}" font-size="${fontSize}" font-weight="500" fill="${color}">${escapeXml(text)}</text></svg>`
+	return { source, width, height }
+}
