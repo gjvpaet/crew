@@ -28,6 +28,7 @@ Copy this checklist into the task list and tick it off as you go:
 - [ ] Tests run in small chunks, one run at a time, never the whole heavy suite at once
 - [ ] Every sub-agent prompt asks for a task list it ticks off as it goes
 - [ ] Every implementer prompt has it invoke the `ponytail` skill before it starts coding
+- [ ] Architecture-wide questions go to graphify, small lookups to grep and Read; every sub-agent prompt says so
 
 Rules for each stage:
 
@@ -59,6 +60,17 @@ Every implementer sub-agent invokes the `ponytail` skill before it writes or cha
 - **The plan still sets the scope.** Ponytail trims how the task is built, never what it must do. The task's requirements, its tests and the spec reviewer's checks stand. If ponytail and the plan disagree about what to build, the plan wins, and the implementer reports the disagreement in its summary.
 - **If the skill isn't there.** If `ponytail` isn't among the sub-agent's skills, it says so in one line of its report and carries on. Don't stop the run for it.
 - Reviewers don't need it: they read, they don't code.
+
+## Graphify: architecture questions only
+
+[graphify](https://github.com/Graphify-Labs/graphify) turns the repository into a knowledge graph you can query. Use it for questions that span the architecture; use plain search for everything else. This applies to you and to every sub-agent.
+
+- **Use graphify** when the answer depends on how several parts of the codebase connect: how a flow moves across modules, what depends on a module, where a change would ripple, which parts are the hubs. Brainstorming, planning and reviewing a cross-cutting change are typical cases.
+- **Don't use graphify for small lookups**: where something is defined, what one function does, who calls one function, or reading a file you can name. `grep` and `Read` are faster and cost nothing.
+- **Query, don't rebuild.** If `graphify-out/graph.json` exists at the repository root, run `graphify query "<question>"`. Use `graphify path "A" "B"` to see how two parts connect, `graphify explain "X"` for one node, and `graphify affected "X"` to see what a change to X reaches. A worktree has no `graphify-out/` of its own, so point at the main checkout's with `--graph <main checkout>/graphify-out/graph.json`. The graph is a map, not the truth: open the files it names before relying on what it says.
+- **Only you build the graph.** If an architecture question comes up and there's no graph, or it predates the changes that matter, invoke the `graphify` skill once (`/graphify .` to build it, `/graphify . --update` to refresh it), before any sub-agent needs it. Sub-agents never build or update it: with no graph, they use `grep` and `Read`.
+- **Put it in the prompt.** Every sub-agent's prompt gets these rules, with the absolute path to `graph.json` when one exists.
+- **If graphify isn't installed** (`command -v graphify` finds nothing), say so in one line and use `grep` and `Read`.
 
 ## Run independent sub-agents in parallel
 
