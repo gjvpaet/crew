@@ -61,7 +61,7 @@ const COST = {
 }
 // Past this many letters a bubble's drawing is shortened in the middle; its alt keeps the whole text.
 const BUBBLE_LETTERS = 28
-// Past this many, cards drop their bubble: a few hundred would push the terminal past its 20,000-node ceiling.
+// Caps the bubbles in a drawing, first cards first (Running leads); 220 uncapped passed the terminal's 20,000 nodes.
 const MAX_BUBBLES = 24
 // A card's frame, its padding, the 8-cell sprite and the gap after it, and the side column with the time and its
 // mark (`12:34 ✗ stopped` at most) and the gap before it: what the terminal's text bar leaves to the rest.
@@ -225,7 +225,13 @@ export function registerPanel(on: On) {
 				: row.pulse === null
 					? {}
 					: { borderColor: pulseColor(row.accent, row.pulse, Svg ? 'graphical' : 'terminal') }
-			const frame = { borderStyle: 'round', ...border, paddingX: 1, marginBottom: 1, marginLeft: arrival?.slide ?? 0 } as const
+			const frame = {
+				borderStyle: 'round',
+				...border,
+				paddingX: 1,
+				marginBottom: 1,
+				marginLeft: arrival?.slide ?? 0
+			} as const
 			const parts = [
 				mascot(row),
 				// width 0 + flexGrow 1: the text column takes what the mascot and the side column leave, and no more.
@@ -318,9 +324,9 @@ export function registerPanel(on: On) {
 			const svg = Svg ? sourcesOf(row) : { mascot: '', bar: '' }
 			const text = row.title.length + row.steps.length + row.usageText.length
 			const bubble = bubbleArt(row)
+			const bubbleChars = bubble ? bubble.source.length + row.bubble.length : 0
 			return {
-				chars:
-					COST.card.chars + svg.mascot.length + svg.bar.length + text + (bubble ? bubble.source.length + row.bubble.length : 0),
+				chars: COST.card.chars + svg.mascot.length + svg.bar.length + text + bubbleChars,
 				nodes: COST.card.nodes + (row.bubble ? COST.bubble.nodes : 0)
 			}
 		}

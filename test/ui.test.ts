@@ -862,11 +862,12 @@ test('past what even one-line rows can hold, the rest of a group is a count', as
 	expect(await terminal.find({ key: 'more-Finished' })).toBeUndefined()
 })
 
-test('a running agent’s card shows what it is doing in a bubble over Pip, the whole text in its alt', async ($, on) => {
+test('a running card shows its action in a bubble over Pip, the whole text in its alt', async ($, on) => {
 	on('tool.call', () => ({ result: {} }))
 	await startTwoAgents($, on)
 	await $.tool.call({ tool: 'Read', file_path: '/repo/hooks/band.tsx', agentId: 'a1' } as any)
-	await $.tool.call({ tool: 'Read', file_path: '/repo/hooks/a-very-long-file-name-for-the-bubble.tsx', agentId: 'a2' } as any)
+	const longFile = '/repo/hooks/a-very-long-file-name-for-the-bubble.tsx'
+	await $.tool.call({ tool: 'Read', file_path: longFile, agentId: 'a2' } as any)
 	const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
 	expect(await svgs(ui, /^Reading band\.tsx$/)).toHaveLength(1)
 	// The card stacks its bubble over its usual row.
@@ -891,7 +892,14 @@ test('a card with nothing to say keeps its single row', async ($, on) => {
 
 test('a finished agent cheers for six seconds, then its bubble goes', async ($, on) => {
 	const clock = await startTwoAgents($, on)
-	await $.turn.complete({ turnId: 's', agentId: 'a1', answer: 'x', durationMs: 1, isAborted: false, reason: 'answer' } as any)
+	await $.turn.complete({
+		turnId: 's',
+		agentId: 'a1',
+		answer: 'x',
+		durationMs: 1,
+		isAborted: false,
+		reason: 'answer'
+	} as any)
 	const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
 	const phrase = phraseFor('a1', 'done')
 	expect(await svgs(ui, new RegExp(`^${phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`))).toHaveLength(1)
@@ -920,6 +928,8 @@ test('only the first 24 cards in a drawing keep their bubble', async ($, on) => 
 	}
 	// The terminal: a desktop drawing's own budget already turns the later cards into lines before this cap bites.
 	const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-	expect(await ui.findAll({ type: 'Text', text: /^▸ Reading f\d+\.ts$/ })).toHaveLength(24)
+	const lines = await ui.findAll({ type: 'Text', text: /^▸ Reading f\d+\.ts$/ })
+	expect(lines.map((line: any) => line.text)).toEqual(Array.from({ length: 24 }, (_, i) => `▸ Reading f${i}.ts`))
+	expect((await ui.find({ key: 'row-a29' }))?.props.flexDirection).toBe('row')
 	await ui.unmount()
 })
