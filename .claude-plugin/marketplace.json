@@ -1,0 +1,12 @@
+{
+	"name": "crew",
+	"description": "Crew, a Claude Code mod for watching your agents work.",
+	"owner": { "name": "Gabriel Joshua Paet" },
+	"plugins": [
+		{
+			"name": "crew",
+			"source": "./",
+			"description": "Progress band above the prompt and a live Agents pane with model, tokens and estimated cost per sub-agent."
+		}
+	]
+}

@@ -53,21 +53,33 @@ Start it by asking Claude to "crew build" something, or to build a feature end t
 
 ## Install
 
-Clone the repository:
+In a Claude Code session:
+
+```
+/plugin install crew --marketplace gjvpaet/crew
+```
+
+Or from your shell:
+
+```bash
+claude plugin install crew --marketplace gjvpaet/crew
+```
+
+Then run `/reload-plugins`, or start a new session.
+
+### From a local clone
+
+To work on Crew, clone it and start Claude Code with the folder:
 
 ```bash
 git clone https://github.com/gjvpaet/crew.git
 ```
 
-Start Claude Code with the plugin folder:
-
 ```bash
 claude --plugin-dir /path/to/crew
 ```
 
-To load it in every session, add the folder to `CLAUDE_CODE_PLUGIN_DIRS` instead.
-
-After pulling changes, run `/reload-plugins` in a session to pick them up.
+To load it in every session, add the folder to `CLAUDE_CODE_PLUGIN_DIRS` instead. After changing files, run `/reload-plugins` to pick them up.
 
 ## Use
 
