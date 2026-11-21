@@ -44,7 +44,24 @@ Accessories: `headset`, `beret`, `glasses`, `hardhat`, `none`. Colours are `#RRG
 
 Crew ships a skill that takes a feature from idea to a finished branch while the panel shows the work. It runs the [superpowers](https://github.com/obra/superpowers) flow in order: brainstorming, writing-plans, using-git-worktrees, then subagent-driven-development with reviewed sub-agents. It also verifies browser-visible changes in your real default browser.
 
-Start it by asking Claude to "crew build" something, or to build a feature end to end. It expects the superpowers plugin to be installed. The `ponytail` skill and the personal `i-have-adhd` skill are used when present.
+Start it by asking Claude to "crew build" something, or to build a feature end to end.
+
+#### Skills it uses
+
+The superpowers skills are required. The others are optional: when one is missing, the run says so in one line and carries on without it.
+
+| Skill | From | What it does in a run | Needed |
+| --- | --- | --- | --- |
+| `superpowers:brainstorming` | [superpowers](https://github.com/obra/superpowers) | Agrees the design with you and writes the spec. No code until you approve it. | Yes |
+| `superpowers:writing-plans` | superpowers | Turns the spec into an implementation plan, with tests for every task and a `Depends on:` line so tasks can run in parallel waves. | Yes |
+| `superpowers:using-git-worktrees` | superpowers | Builds in an isolated worktree, on a base branch you choose. | Yes |
+| `superpowers:subagent-driven-development` | superpowers | Builds each task with a sub-agent, then a spec review and a quality review. Independent tasks run side by side. | Yes |
+| `superpowers:finishing-a-development-branch` | superpowers | Wraps up the branch once every task is built. Crew's skill then removes the worktrees and keeps the branches. | Yes |
+| `ponytail` | a personal skill in `~/.claude/skills` | Keeps the plan lean, and every implementer makes the smallest change that does its task. | No |
+| `i-have-adhd` | a personal skill in `~/.claude/skills` | Keeps every message and sub-agent report short and to the point. It can't be invoked by the model, so agents read its `SKILL.md`. | No |
+| `graphify` | [graphify](https://github.com/Graphify-Labs/graphify) | Answers questions that span the architecture from a knowledge graph of the repo. Small lookups still use grep and Read. | No |
+
+For browser checks it drives your real default browser through Claude in Chrome when that browser is Chrome. With another browser, it asks you how to check.
 
 ## Requirements
 
