@@ -2,6 +2,12 @@
 
 A Claude Code mod that lets you watch your agents work. It adds a progress band above the prompt and an **Agents** panel listing Main and every sub-agent: what each is doing, its model, tokens, estimated cost and progress, each drawn as a small pixel mascot.
 
+In the Claude app, the Agents panel docks beside the transcript:
+
+![The band above the prompt and the docked Agents panel in the Claude app, with two sub-agents running](docs/crew-desktop-preview.png)
+
+In the terminal:
+
 ![The band above the prompt and the Agents panel, in the terminal](docs/crew-terminal-preview.png)
 
 ## What it does
