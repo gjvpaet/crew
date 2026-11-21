@@ -113,3 +113,7 @@ Validate the plugin:
 ```bash
 claude plugin validate .
 ```
+
+## License
+
+MIT. See [LICENSE](LICENSE).

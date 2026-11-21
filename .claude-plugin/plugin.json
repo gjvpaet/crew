@@ -2,5 +2,6 @@
 	"name": "crew",
 	"version": "0.1.0",
 	"description": "Progress band above the prompt and a live Agents pane with model, tokens and estimated cost per sub-agent.",
+	"license": "MIT",
 	"types": "./types/index.d.ts"
 }
